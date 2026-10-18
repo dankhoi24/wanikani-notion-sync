@@ -123,17 +123,29 @@ def lesson_activity(assignments, now, tz, tracking_start):
     from zoneinfo import ZoneInfo
     today=now.astimezone(ZoneInfo(tz)).date()
     daily=Counter()
+    radical=Counter()
+    kanji=Counter()
     vocab=Counter()
+    gate=Counter()
     starts=[]
     for item in assignments:
         data=item.get("data", {})
         at=iso_dt(data.get("started_at"))
         if at is None or at > now:
             continue
+        subject_type=data.get("subject_type")
+        if subject_type not in ("radical","kanji","vocabulary","kana_vocabulary"):
+            continue
         starts.append(at)
         day=at.astimezone(ZoneInfo(tz)).date()
         daily[day]+=1
-        if data.get("subject_type") in ("vocabulary","kana_vocabulary"):
+        if subject_type=="radical":
+            radical[day]+=1
+            gate[day]+=1
+        elif subject_type=="kanji":
+            kanji[day]+=1
+            gate[day]+=1
+        else:
             vocab[day]+=1
     # Count only dates starting on the new plan's Tracking Start.
     # The current (partial) day is included, so the ETA can react immediately.
@@ -148,6 +160,15 @@ def lesson_activity(assignments, now, tz, tracking_start):
       "Lessons 30d Avg":avg(daily,30),
       "Vocab 7d Avg":avg(vocab,7),
       "Vocab 30d Avg":avg(vocab,30),
+      "Radical 7d Avg":avg(radical,7),
+      "Kanji 7d Avg":avg(kanji,7),
+      "Radical 30d Avg":avg(radical,30),
+      "Kanji 30d Avg":avg(kanji,30),
+      "Gate 7d Avg":avg(gate,7),
+      "Gate 30d Avg":avg(gate,30),
+      "Radical Lessons Today":radical[today] if today>=tracking_start else 0,
+      "Kanji Lessons Today":kanji[today] if today>=tracking_start else 0,
+      "Vocab Lessons Today":vocab[today] if today>=tracking_start else 0,
       "Active Days 7d":sum(daily[today-timedelta(days=i)]>0 for i in range(min(7,elapsed_days))),
       "Elapsed Days":elapsed_days
     },starts
@@ -259,9 +280,9 @@ def main():
                                required("NOTION_MILESTONES_DATA_SOURCE_ID"))
     field_metrics = ["Learned Kanji", "Learned Vocab", "Apprentice", "Guru", "Master",
                      "Enlightened", "Burned", "Accuracy Pct", "Reviews Now", "Reviews Next 24h"]
-    validate_source(snaps_id, {"Name", "Synced At", "Level", "Days Per Level", "Daily Target","Lessons Today","Lessons 7d Avg","Lessons 30d Avg","Vocab 7d Avg","Vocab 30d Avg","Target Hit 7d Pct","Actual Pace Days/Level", *field_metrics}, notion_token)
+    validate_source(snaps_id, {"Name", "Synced At", "Level", "Days Per Level", "Daily Target","Lessons Today","Lessons 7d Avg","Lessons 30d Avg","Vocab 7d Avg","Vocab 30d Avg","Radical 7d Avg","Kanji 7d Avg","Radical 30d Avg","Kanji 30d Avg","Gate 7d Avg","Gate 30d Avg","Radical Lessons Today","Kanji Lessons Today","Vocab Lessons Today","Target Hit 7d Pct","Actual Pace Days/Level", *field_metrics}, notion_token)
     validate_source(milestones_id, {"Milestone", "Target WK Level", "Start", "ETA",
-                                    "Days Left", "Progress Pct", "Basis","Target ETA","Actual Pace","Lessons/Level","Recent Pace (7d)","ETA Status","Target Full Lessons ETA","Forecast Method"}, notion_token)
+                                    "Days Left", "Progress Pct", "Basis","Target ETA","Actual Pace","Lessons/Level","Recent Pace (7d)","ETA Status","Target Full Lessons ETA","Actual Full Lessons ETA","Gate Pace (7d)","Gate Pace (30d)","Radical Pace (7d)","Kanji Pace (7d)","Vocab Pace (7d)","Full ETA Status","Forecast Method"}, notion_token)
     settings_id = required("NOTION_SETTINGS_DATA_SOURCE_ID")
     validate_source(settings_id, {"Name","Daily Lessons Target","Timezone","Tracking Start"}, notion_token)
     daily_target,tz,tracking_start = learning_settings(settings_id,notion_token)
@@ -324,9 +345,14 @@ def main():
     activity,started_at=lesson_activity(assignments,now,tz,tracking_start)
     volume,samples=lessons_per_level(started_at,progressions)
     actual=activity["Lessons 30d Avg"]
-    rate_for_eta,rate_source=choose_eta_rate(activity["Lessons 7d Avg"],actual,daily_target)
-    actual_pace=(round(max(7,volume/rate_for_eta),2)
-                 if volume is not None and rate_for_eta is not None else None)
+    # Level-up lessons require Radical/Kanji (NOT Vocabulary). Starting
+    # every remaining lesson also includes Vocabulary and Kana Vocabulary.
+    gate_rate,gate_source=choose_eta_rate(
+        activity["Gate 7d Avg"],activity["Gate 30d Avg"],daily_target)
+    full_rate,full_source=choose_eta_rate(
+        activity["Lessons 7d Avg"],actual,daily_target)
+    actual_pace=(round(max(7,volume/full_rate),2)
+                 if volume is not None and full_rate is not None else None)
     gate=levels[0] if levels else {}
     key = now.strftime("WK %Y-%m-%d UTC")
     snap = props("Name", key, {"Level": level, "Days Per Level": pace, **counts,
@@ -335,6 +361,15 @@ def main():
                  "Lessons 30d Avg":activity["Lessons 30d Avg"],
                  "Vocab 7d Avg":activity["Vocab 7d Avg"],
                  "Vocab 30d Avg":activity["Vocab 30d Avg"],
+                 "Radical 7d Avg":activity["Radical 7d Avg"],
+                 "Kanji 7d Avg":activity["Kanji 7d Avg"],
+                 "Radical 30d Avg":activity["Radical 30d Avg"],
+                 "Kanji 30d Avg":activity["Kanji 30d Avg"],
+                 "Gate 7d Avg":activity["Gate 7d Avg"],
+                 "Gate 30d Avg":activity["Gate 30d Avg"],
+                 "Radical Lessons Today":activity["Radical Lessons Today"],
+                 "Kanji Lessons Today":activity["Kanji Lessons Today"],
+                 "Vocab Lessons Today":activity["Vocab Lessons Today"],
                  "Target Hit 7d Pct":round(activity["Lessons 7d Avg"]/daily_target*100,1) if activity["Lessons 7d Avg"] is not None else None,
                  "Actual Pace Days/Level":actual_pace,
                  "Reviews Done (Tracked)":review["Reviews Since Baseline"],
@@ -347,7 +382,7 @@ def main():
                  "Available Lessons":gate.get("Lessons Available")},
                  
                  dates={"Synced At": now})
-    print(f"WaniKani level={level}; target={daily_target}; 7d={activity['Lessons 7d Avg']}; 30d={actual}; per-level inventory used for forecast")
+    print(f"WaniKani level={level}; target={daily_target}; full7d={activity['Lessons 7d Avg']}; gate7d={activity['Gate 7d Avg']}; radical7d={activity['Radical 7d Avg']}; kanji7d={activity['Kanji 7d Avg']}; vocab7d={activity['Vocab 7d Avg']}; inventory ETA")
     print("Snapshot", upsert(snaps_id, "Name", key, snap, notion_token))
     config = target_config
     srs_intervals=intervals_from_srs(collection("spaced_repetition_systems",wk_token))
@@ -358,39 +393,60 @@ def main():
             raise ValueError("Milestone target must be a WaniKani level 1..60")
         title = item["name"]
         eta = (forecast(target,level,None,None,now,progressions) if level>=target
-               else forecast_with_inventory(levels,level,target,rate_for_eta,now,earliest_gate))
+               else forecast_with_inventory(levels,level,target,gate_rate,now,earliest_gate))
         target_eta = (eta if level>=target else
                       forecast_with_inventory(levels,level,target,daily_target,now,earliest_gate))
         full_target_eta = forecast_full_lessons(levels,level,target,daily_target,now,target_eta)
+        # Without any observed Radical/Kanji learning, future levels cannot
+        # be reached at the observed lesson mix: do not invent a completion ETA.
+        actual_full_eta = (forecast_full_lessons(
+            levels,level,target,full_rate,now,eta)
+            if level>=target or gate_rate is not None else None)
         eta_status = ("Achieved" if level >= target else
-                      "Paused: 0 new lessons/day" if rate_for_eta is None else
-                      "Recent pace: 7-day" if rate_source=="observed_recent_7d" else
-                      "Recent pace: 30-day fallback")
-        method=("Per-level Gate Lessons Remaining + current Guru/SRS dates; "
-                "7-day optimistic lower bound per future level; "
-                "Full Lessons includes vocabulary, all subjects below target. "
-                "Zero actual pace has no finite ETA. "
-                "Review accuracy is tracked separately and not treated as ETA probability.")
+                      "Paused: 0 Radical/Kanji pace" if gate_rate is None else
+                      "Gate pace (R+K): 7-day" if gate_source=="observed_recent_7d" else
+                      "Gate pace (R+K): 30-day")
+        full_eta_status = ("Achieved" if level >= target else
+                           "Paused: no new lessons" if full_rate is None else
+                           "Blocked: no Radical/Kanji pace" if gate_rate is None else
+                           "Full pace: 7-day" if full_source=="observed_recent_7d" else
+                           "Full pace: 30-day")
+        method=("Actual level ETA: Radical+Kanji starts/day (7d, then 30d), "
+                "gate-only per-level lessons + current Guru/SRS; Vocabulary "
+                "does NOT count as gate pace. Actual Full Lessons ETA: all "
+                "Radical+Kanji+Vocabulary+Kana Vocabulary starts/day and "
+                "all unstarted lessons; cannot precede actual gate ETA. "
+                "Targets use 15 total lessons/day under optimistic allocation. "
+                "Future-level SRS floor=7 days/level, accuracy not a probability.")
         days_left = max(0, (eta - now.date()).days) if eta else None
         basis=(f"WaniKani level proxy, NOT JLPT readiness. "
-               f"Actual lessons/day 7d={activity['Lessons 7d Avg']}, 30d={actual}; "
-               f"ETA rate={rate_for_eta} ({rate_source}); target rate={daily_target}; "
-               f"tracking from {tracking_start}. "
-               f"Exact remaining subjects and gate estimates from WaniKani API; "
-               f"current-level SRS lower bound={earliest_gate}; "
-               f"future-level SRS floor=7 days (optimistic heuristic). "
-               f"New review accuracy={review['Review Accuracy New']}. "
-               f"No artificial 141-lessons-per-level multiplier. "
-               f"All dates are provisional and do not prove JLPT readiness.")
+               f"Actual new lessons/day: 7d total={activity['Lessons 7d Avg']}, "
+               f"radical={activity['Radical 7d Avg']}, kanji={activity['Kanji 7d Avg']}, "
+               f"vocab/kana={activity['Vocab 7d Avg']}; "
+               f"30d total={actual}, gate R+K={activity['Gate 30d Avg']}. "
+               f"Gate ETA pace={gate_rate} ({gate_source}); "
+               f"full ETA pace={full_rate} ({full_source}); target={daily_target}; "
+               f"tracking start={tracking_start}, elapsed={activity['Elapsed Days']} days. "
+               f"Inventory from WaniKani API, current earliest Guru bound={earliest_gate}; "
+               f"future SRS floor=7d/level (heuristic). "
+               f"Full ETA is optimistic; R+K allocation and review accuracy may delay it.")
         extra=milestone_inventory(levels,level,target)
         properties = props("Milestone", title,
                            {"Target WK Level": target, "Progress Pct": round(min(100,level/target*100),1),
                             "Days Left": days_left,"Actual Pace":actual,"Recent Pace (7d)":activity["Lessons 7d Avg"],"Lessons/Level":volume,
-                            "Review Accuracy New":review["Review Accuracy New"],**extra},
+                            "Review Accuracy New":review["Review Accuracy New"],
+                            "Gate Pace (7d)":activity["Gate 7d Avg"],
+                            "Gate Pace (30d)":activity["Gate 30d Avg"],
+                            "Radical Pace (7d)":activity["Radical 7d Avg"],
+                            "Kanji Pace (7d)":activity["Kanji 7d Avg"],
+                            "Vocab Pace (7d)":activity["Vocab 7d Avg"],**extra},
                            dates={"Start": tracking_start, "ETA": eta, "Target ETA":target_eta,
+                                  "Actual Full Lessons ETA":actual_full_eta,
                                   "Target Full Lessons ETA":full_target_eta,
                                   "Next Gate Earliest":earliest_gate},
-                           rich={"Basis": basis,"ETA Status":eta_status,"Forecast Method":method})
+                           rich={"Basis": basis,"ETA Status":eta_status,
+                                 "Full ETA Status":full_eta_status,
+                                 "Forecast Method":method})
         print(title, upsert(milestones_id, "Milestone", title, properties, notion_token),
               "ETA:", eta or "insufficient history")
     print("Success: Notion has been synchronized.")

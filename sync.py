@@ -5,6 +5,7 @@ import statistics
 import sys
 import time
 from collections import Counter
+from n5_dashboard import card_values, update_n5_dashboard
 from wk_detailed import (subjects_by_id,assignments_by_id,inventory,milestone_inventory,
                          review_counters,review_delta,earliest_next_gate,intervals_from_srs,
                          forecast_with_inventory,forecast_full_lessons)
@@ -449,6 +450,17 @@ def main():
                                  "Forecast Method":method})
         print(title, upsert(milestones_id, "Milestone", title, properties, notion_token),
               "ETA:", eta or "insufficient history")
+        n5_dashboard_id=os.environ.get("NOTION_N5_DASHBOARD_PAGE_ID", "").strip()
+        if target == 10 and n5_dashboard_id:
+            cards, stamp = card_values(
+                level, target,
+                {**extra, "ETA":eta, "Target ETA":target_eta,
+                 "Actual Full Lessons ETA":actual_full_eta,
+                 "Target Full Lessons ETA":full_target_eta},
+                gate, activity, counts, review, now, tz)
+            updates=update_n5_dashboard(notion, notion_token, n5_dashboard_id,
+                                        cards, stamp)
+            print("N5 dashboard cards updated:", updates)
     print("Success: Notion has been synchronized.")
 
 

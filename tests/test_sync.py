@@ -354,7 +354,8 @@ class SyncTests(unittest.TestCase):
         upload.assert_called_once()
         self.assertEqual(len(calls),2)
         self.assertEqual(calls[1][1],"/blocks/chart-block-id")
-        self.assertEqual(calls[1][2]["image"]["type"],"file_upload")
+        self.assertNotIn("type", calls[1][2]["image"])
+        self.assertEqual(calls[1][2]["image"]["file_upload"]["id"],"some-upload-id")
         self.assertIn("WK_DAILY_COMBO_CHART",
                       calls[1][2]["image"]["caption"][0]["text"]["content"])
 

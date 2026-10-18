@@ -272,6 +272,48 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(cards["REVIEWS HÔM NAY · ƯỚC TÍNH"],"≈ 7 review")
         self.assertIn("Kanji 3",cards["LESSONS HÔM NAY THEO LOẠI"])
 
+    def test_daily_lesson_history_starts_oct18_and_uses_vietnam_dates(self):
+        from daily_lessons import history_rows
+        now=datetime(2026,10,18,18,30,tzinfo=timezone.utc)  # 19 Oct 01:30 VN
+        rows=[
+            {"data":{"started_at":"2026-10-18T16:40:00Z","subject_type":"kanji"}}, # Oct18 VN
+            {"data":{"started_at":"2026-10-18T13:00:00Z","subject_type":"kanji"}}, # Oct18
+            {"data":{"started_at":"2026-10-18T17:10:00Z","subject_type":"vocabulary"}}, # Oct19
+            {"data":{"started_at":"2026-10-17T10:00:00Z","subject_type":"radical"}}, # before plan
+            {"data":{"started_at":"2026-10-18T20:00:00Z","subject_type":"kana_vocabulary"}}, # future
+        ]
+        data=history_rows(rows,now,"Asia/Ho_Chi_Minh",date(2026,10,18),15)
+        self.assertEqual([x["Day"].isoformat() for x in data],
+                         ["2026-10-18","2026-10-19"])
+        self.assertEqual([x["Lessons Today"] for x in data],[2,1])
+        self.assertEqual([x["Recent Pace (7d)"] for x in data],[2.0,1.5])
+        self.assertEqual([x["Kanji Today"] for x in data],[2,0])
+        self.assertEqual([x["Vocab Today"] for x in data],[0,1])
+        self.assertEqual([x["Daily Target"] for x in data],[15,15])
+
+    def test_daily_lesson_history_includes_zero_days(self):
+        from daily_lessons import history_rows
+        now=datetime(2026,10,20,12,tzinfo=timezone.utc)
+        rows=[{"data":{"started_at":"2026-10-18T12:00:00Z",
+                       "subject_type":"kana_vocabulary"}}]
+        data=history_rows(rows,now,"Asia/Ho_Chi_Minh",date(2026,10,18),15)
+        self.assertEqual([r["Lessons Today"] for r in data],[1,0,0])
+        self.assertEqual([r["Recent Pace (7d)"] for r in data],[1.0,0.5,0.33])
+        self.assertEqual([r["Vocab Today"] for r in data],[1,0,0])
+
+    def test_daily_lesson_history_rolling_seven_and_recent_backfill(self):
+        from daily_lessons import history_rows
+        from datetime import timedelta
+        now=datetime(2026,10,27,12,tzinfo=timezone.utc)
+        starts=[{"data":{"started_at":(
+            datetime(2026,10,18,12,tzinfo=timezone.utc)+timedelta(days=d)
+            ).isoformat(),"subject_type":"kanji"}} for d in range(10)]
+        data=history_rows(starts,now,"Asia/Ho_Chi_Minh",date(2026,10,18),15)
+        self.assertEqual(len(data),7)
+        self.assertEqual(data[0]["Day"],date(2026,10,21))
+        self.assertEqual(data[-1]["Day"],date(2026,10,27))
+        self.assertTrue(all(x["Recent Pace (7d)"]==1 for x in data))
+
     def test_volume_and_target_projection(self):
         from sync import lessons_per_level,workload_eta
         history=[{"data":{"level":i,"started_at":f"2026-09-{d:02d}T00:00:00Z"}} for i,d in [(1,1),(2,11),(3,21)]]

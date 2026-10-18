@@ -1,6 +1,14 @@
 name: Sync WaniKani to Notion
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'sync.py'
+      - 'wk_detailed.py'
+      - 'tests/**'
+      - 'milestones.json'
+      - '.github/workflows/sync.yml'
   schedule:
     # Times UTC: 07:17, 13:17, 19:17, 01:17 in Viet Nam.
     - cron: '17 0,6,12,18 * * *'

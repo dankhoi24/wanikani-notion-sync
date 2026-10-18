@@ -8,6 +8,7 @@ from collections import Counter
 from n5_dashboard import card_values, update_n5_dashboard
 from unlock_forecast import estimate_unlocks_today, unlock_cards
 from daily_lessons import history_rows, push_daily_rows
+from notion_svg_chart import update_daily_chart
 from daily_reviews import (most_recent_before_midnight, day_start_utc,
                            estimate_reviews_today)
 from wk_detailed import (subjects_by_id,assignments_by_id,inventory,milestone_inventory,
@@ -496,6 +497,15 @@ def main():
             updates=update_n5_dashboard(notion, notion_token, n5_dashboard_id,
                                         cards, stamp)
             print("N5 dashboard cards updated:", updates)
+    if n5_dashboard_id and daily_source_id:
+        # Render one native SVG image holding BOTH daily lessons and 7-day pace.
+        # Does not consume Notion Free's single interactive Chart-view allowance.
+        chart_days=history_rows(assignments,now,tz,tracking_start,daily_target,
+                                lookback_days=30)
+        if update_daily_chart(notion,notion_token,n5_dashboard_id,
+                              chart_days,now,tz):
+            print("N5 combined daily chart image updated:",
+                  len(chart_days),"local calendar days")
     print("Success: Notion has been synchronized.")
 
 

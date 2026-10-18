@@ -6,6 +6,7 @@ import sys
 import time
 from collections import Counter
 from n5_dashboard import card_values, update_n5_dashboard
+from unlock_forecast import estimate_unlocks_today, unlock_cards
 from wk_detailed import (subjects_by_id,assignments_by_id,inventory,milestone_inventory,
                          review_counters,review_delta,earliest_next_gate,intervals_from_srs,
                          forecast_with_inventory,forecast_full_lessons)
@@ -388,6 +389,11 @@ def main():
     config = target_config
     srs_intervals=intervals_from_srs(collection("spaced_repetition_systems",wk_token))
     earliest_gate=earliest_next_gate(subjects,assigned,level,now,srs_intervals)
+    unlock_estimate=estimate_unlocks_today(subjects,assigned,level,now,tz)
+    print("Conditional unlock forecast local date:", unlock_estimate["date"],
+          "already available:", unlock_estimate["available_now"],
+          "additional possible:", unlock_estimate["potential_today"],
+          "earliest:", unlock_estimate["first_unlock_at"])
     for item in config:
         target = int(item["target_wk_level"])
         if target < 1 or target > 60:
@@ -458,6 +464,7 @@ def main():
                  "Actual Full Lessons ETA":actual_full_eta,
                  "Target Full Lessons ETA":full_target_eta},
                 gate, activity, counts, review, now, tz)
+            cards.update(unlock_cards(unlock_estimate,tz))
             updates=update_n5_dashboard(notion, notion_token, n5_dashboard_id,
                                         cards, stamp)
             print("N5 dashboard cards updated:", updates)

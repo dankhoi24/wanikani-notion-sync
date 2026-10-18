@@ -1,0 +1,88 @@
+# WaniKani → Notion JLPT dashboard
+
+This repository synchronizes WaniKani v2 statistics to a private Notion dashboard using GitHub Actions. Python 3.12 and standard library only.
+
+**Already created in your Notion workspace:**
+
+- [Dashboard](https://app.notion.com/p/3fd98ffb213081e9948af06cb0ae5888)
+- [WaniKani Snapshots](https://app.notion.com/p/67adf543c29941c894b9379bc5542ad5) — data source `a35d8794-a5c6-4208-ab52-b21d793bf010`
+- [JLPT Milestones](https://app.notion.com/p/722a67ebb36e4d819fdd09d8fd03fc05) — data source `b45e8463-c10a-4d95-88c3-e43eaa260290`
+
+## 1. Get your WaniKani token (read-only)
+
+Open https://www.wanikani.com/settings/personal_access_tokens , create a v2 API token. **Do not enable any write/update permissions**. Copy the token into a password manager temporarily.
+
+## 2. Create a separate Notion API connection for GitHub
+
+> ChatGPT's existing Notion connection does not supply its access token to your GitHub Actions workflow.
+
+1. Open Notion `Settings → Connections` and turn on Developer Mode if needed, then create an internal connection / personal integration at the developer tools area (or https://www.notion.com/my-integrations).
+2. Name it `WK Notion Sync`. Grant the minimum `Read content`, `Insert content`, and `Update content` capabilities needed to query and write the two databases. Copy its token.
+3. On the linked Notion dashboard page, click `••• → Connections → Add connections`, choose `WK Notion Sync` and approve its access. If either database returns 403/404, open that specific database and repeat `Add connections` there.
+
+## 3. Create a private GitHub repository
+
+At https://github.com/new create a repository named e.g. `wanikani-notion-sync`, visibility **Private**. Upload the contents of this folder, **including hidden folder `.github/`**; or extract locally and push with Git.
+
+```bash
+git init
+git add .
+git commit -m "Add WaniKani Notion sync"
+git branch -M main
+git remote add origin https://github.com/YOUR_USERNAME/wanikani-notion-sync.git
+git push -u origin main
+```
+
+## 4. Configure GitHub Actions secrets
+
+In the new repo open `Settings → Secrets and variables → Actions → Secrets → New repository secret`.
+
+| Secret name | Value |
+|---|---|
+| `WK_TOKEN` | WaniKani API v2 read-only token |
+| `NOTION_TOKEN` | Token of the new `WK Notion Sync` Notion integration |
+
+Do not put tokens in `sync.py`, README, workflow YAML, Git commits, screenshots, chat messages, or Actions logs. The two Notion data source IDs are already configured inside the workflow; they are identifiers, not secrets.
+
+## 5. Test first run
+
+In your repository open `Actions → Sync WaniKani to Notion → Run workflow` (select `main`).
+
+The job first runs unit tests and then fetches WaniKani data. A successful run creates **one daily snapshot row** and upserts three milestone rows. Re-running on the same UTC date updates that daily snapshot, rather than duplicating it. The first run may need several WaniKani pages to read all your history.
+
+See the Actions log if it fails:
+
+- `Missing ...`: secret absent or named incorrectly.
+- `HTTP 401`: API token expired, revoked, or copied incorrectly.
+- `HTTP 403` or `HTTP 404` for `data_sources`: grant the Notion integration access to the destination databases, check the IDs.
+- `missing properties`: don't rename Notion columns; the script requires their exact names.
+- Milestone ETA empty: fewer than 2 historically observed level durations; script **does not invent a forecast**.
+
+## 6. Scheduling and customization
+
+The workflow runs at `00:17`, `06:17`, `12:17`, `18:17` UTC (in Viet Nam at **07:17, 13:17, 19:17, 01:17**). GitHub schedules can be delayed or occasionally missed, and only run from the default branch. Manual `Run workflow` is always available.
+
+Edit `milestones.json` to change the **configurable WaniKani proxy levels**. The supplied values 10/20/30 are **examples only**, not official JLPT correspondence. N5/N4/N3 additionally require grammar, listening, reading, and mock-test preparation. WaniKani alone cannot certify JLPT readiness. The forecast uses median durations of up to 10 most recent consecutive level transitions, but gaps due to breaks/resets may affect the ETA.
+
+Metrics:
+
+- `Learned Kanji/Vocab` = assignments with SRS stage >=1, not proof of mastery.
+- SRS stage groups are current states, not counts of unique characters.
+- `Accuracy Pct` = weighted historical meaning + reading response accuracy on kanji/vocabulary review statistics (not an official JLPT score).
+- `Reviews Now` / `Reviews Next 24h` = snapshot of WaniKani summary, which is updated roughly hourly.
+- `Days Per Level` = median historical interval between starts of consecutive levels. If fewer than 2 intervals, no forecast.
+- `Progress Pct` in Milestones = WaniKani level / configured proxy target; **not actual JLPT coverage**.
+
+## 7. Local verification (optional)
+
+```bash
+python -m unittest discover -s tests -v
+# Never put secrets in the repo. Export them locally only if you want a manual sync.
+# WK_TOKEN=... NOTION_TOKEN=... NOTION_SNAPSHOTS_DATA_SOURCE_ID=... NOTION_MILESTONES_DATA_SOURCE_ID=... python sync.py
+```
+
+## Privacy and permissions
+
+Keep the repository private. Limit collaborators because people with write access may be able to modify workflows that consume secrets. Rotate tokens if leaked. Notion integrations need direct permission to the relevant pages/databases. No need to send a WaniKani or Notion API token to ChatGPT.
+
+Useful references: https://docs.api.wanikani.com/20170710/ · https://developers.notion.com/reference/intro · https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets

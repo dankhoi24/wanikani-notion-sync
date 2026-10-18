@@ -5,6 +5,8 @@ import statistics
 import sys
 import time
 from collections import Counter
+from wk_detailed import (subjects_by_id,assignments_by_id,inventory,milestone_inventory,
+                         review_counters,review_delta,earliest_next_gate,intervals_from_srs)
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -268,6 +270,47 @@ def main():
     progressions = collection("level_progressions", wk_token)
     stats = collection("review_statistics?subject_types=kanji,vocabulary", wk_token)
     summary = wk("summary", wk_token)["data"]
+    subject_rows = collection("subjects", wk_token)
+    subjects = subjects_by_id(subject_rows)
+    assigned = assignments_by_id(assignments)
+    review_stats_all = collection("review_statistics", wk_token)
+    counters = review_counters(review_stats_all)
+    target_config = json.loads(Path(__file__).with_name("milestones.json").read_text(encoding="utf-8"))
+    max_target = min(60,max(int(x["target_wk_level"]) for x in target_config))
+    levels = inventory(subjects,assigned,level,max_target)
+    # WaniKani API no longer exposes historical completed review events.
+    # Checkpoint cumulative counts. The first sync establishes the baseline.
+    checkpoints_id=required("NOTION_REVIEW_CHECKPOINTS_DATA_SOURCE_ID")
+    detail_id=required("NOTION_LEVEL_BREAKDOWN_DATA_SOURCE_ID")
+    previous_rows=notion("POST",f"/data_sources/{checkpoints_id}/query",notion_token,
+                         {"page_size":100,"sorts":[{"property":"Captured At","direction":"descending"}]})["results"]
+    def old_counts(row):
+        p=row["properties"]
+        return {k:p[field]["number"] or 0 for k,field in (
+            ("meaning_correct","Meaning Correct Total"),
+            ("meaning_incorrect","Meaning Incorrect Total"),
+            ("reading_correct","Reading Correct Total"),
+            ("reading_incorrect","Reading Incorrect Total"))}
+    checkpoint_previous=old_counts(previous_rows[0]) if previous_rows else counters
+    checkpoint_base=old_counts(previous_rows[-1]) if previous_rows else counters
+    review=review_delta(counters,checkpoint_base,checkpoint_previous)
+    checkpoint=props("Name",now.strftime("Checkpoint %Y-%m-%d %H:%M UTC"),{
+        "Meaning Correct Total":counters["meaning_correct"],
+        "Meaning Incorrect Total":counters["meaning_incorrect"],
+        "Reading Correct Total":counters["reading_correct"],
+        "Reading Incorrect Total":counters["reading_incorrect"],
+        "Reviews Since Baseline":review["Reviews Since Baseline"],
+        "Reviews Since Last Sync":review["Reviews Since Last Sync"],
+        "Meaning Accuracy New":review["Meaning Accuracy New"],
+        "Reading Accuracy New":review["Reading Accuracy New"],
+        "Review Accuracy New":review["Review Accuracy New"]},
+        dates={"Captured At":now},
+        rich={"Note":"Review completed count is a lower-bound proxy based on correct meaning answers; API does not expose exact review-event history."})
+    upsert(checkpoints_id,"Name",now.strftime("Checkpoint %Y-%m-%d %H:%M UTC"),checkpoint,notion_token)
+    for row in levels:
+        value=props("Name",f"WK Level {row['Level']}",{k:v for k,v in row.items()},
+                    dates={"Last Synced":now})
+        upsert(detail_id,"Name",f"WK Level {row['Level']}",value,notion_token)
     pace, observations, current_started = median_level_days(progressions, level)
     counts = metrics(assignments, stats, summary, now)
     activity,started_at=lesson_activity(assignments,now,tz,tracking_start)
@@ -276,6 +319,7 @@ def main():
     rate_for_eta,rate_source=choose_eta_rate(activity["Lessons 7d Avg"],actual,daily_target)
     actual_pace=(round(max(7,volume/rate_for_eta),2)
                  if volume is not None and rate_source!="target_only_provisional" else None)
+    gate=levels[0] if levels else {}
     key = now.strftime("WK %Y-%m-%d UTC")
     snap = props("Name", key, {"Level": level, "Days Per Level": pace, **counts,
                  "Daily Target":daily_target,"Lessons Today":activity["Lessons Today"],
@@ -284,11 +328,22 @@ def main():
                  "Vocab 7d Avg":activity["Vocab 7d Avg"],
                  "Vocab 30d Avg":activity["Vocab 30d Avg"],
                  "Target Hit 7d Pct":round(activity["Lessons 7d Avg"]/daily_target*100,1) if activity["Lessons 7d Avg"] is not None else None,
-                 "Actual Pace Days/Level":actual_pace},
+                 "Actual Pace Days/Level":actual_pace,
+                 "Reviews Done (Tracked)":review["Reviews Since Baseline"],
+                 "Reviews Last Sync":review["Reviews Since Last Sync"],
+                 "Review Accuracy (Tracked)":review["Review Accuracy New"],
+                 "Meaning Accuracy (Tracked)":review["Meaning Accuracy New"],
+                 "Reading Accuracy (Tracked)":review["Reading Accuracy New"],
+                 "Next Level Guru Remaining":gate.get("Kanji To Guru"),
+                 "Next Level Gate Reviews":gate.get("Min Reviews to Gate"),
+                 "Available Lessons":gate.get("Lessons Available")},
+                 
                  dates={"Synced At": now})
     print(f"WaniKani level={level}; target={daily_target} lessons/day; actual 7d={activity['Lessons 7d Avg']}, 30d={actual}; estimated lessons/level={volume}, samples={samples}")
     print("Snapshot", upsert(snaps_id, "Name", key, snap, notion_token))
-    config = json.loads(Path(__file__).with_name("milestones.json").read_text(encoding="utf-8"))
+    config = target_config
+    srs_intervals=intervals_from_srs(collection("spaced_repetition_systems",wk_token))
+    earliest_gate=earliest_next_gate(subjects,assigned,level,now,srs_intervals)
     for item in config:
         target = int(item["target_wk_level"])
         if target < 1 or target > 60:
@@ -306,10 +361,13 @@ def main():
                  f"7d active days={activity['Active Days 7d']}. "
                  f"Workload estimate only; ETA may be provisional, minimum 7 days per level for SRS; "
                  f"cannot predict kanji Guru timing precisely.")
+        extra=milestone_inventory(levels,level,target)
         properties = props("Milestone", title,
                            {"Target WK Level": target, "Progress Pct": round(min(100,level/target*100),1),
-                            "Days Left": days_left,"Actual Pace":actual,"Recent Pace (7d)":activity["Lessons 7d Avg"],"Lessons/Level":volume},
-                           dates={"Start": tracking_start, "ETA": eta, "Target ETA":target_eta}, rich={"Basis": basis})
+                            "Days Left": days_left,"Actual Pace":actual,"Recent Pace (7d)":activity["Lessons 7d Avg"],"Lessons/Level":volume,
+                            "Review Accuracy New":review["Review Accuracy New"],**extra},
+                           dates={"Start": tracking_start, "ETA": eta, "Target ETA":target_eta,
+                                  "Next Gate Earliest":earliest_gate}, rich={"Basis": basis})
         print(title, upsert(milestones_id, "Milestone", title, properties, notion_token),
               "ETA:", eta or "insufficient history")
     print("Success: Notion has been synchronized.")

@@ -76,7 +76,7 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(data["Lessons Today"],0)
         self.assertEqual(data["Lessons 7d Avg"],0)
         self.assertEqual(data["Lessons 30d Avg"],0)
-        self.assertEqual(choose_eta_rate(0,0,15),(15,"target_only_provisional"))
+        self.assertEqual(choose_eta_rate(0,0,15),(None,"no_new_lessons_since_tracking_start"))
 
     def test_recent_ignores_before_start_includes_today(self):
         from sync import lesson_activity,choose_eta_rate
@@ -117,6 +117,34 @@ class DetailedTests(unittest.TestCase):
         base={k:5 for k in ("meaning_correct","meaning_incorrect","reading_correct","reading_incorrect")}
         now={k:3 for k in base}
         self.assertFalse(review_delta(now,base,base)["Counter Valid"])
+
+    def test_inventory_forecast_uses_each_level_not_141(self):
+        from wk_detailed import forecast_with_inventory, forecast_full_lessons
+        from datetime import timedelta
+        now=datetime(2026,10,18,15,0,tzinfo=timezone.utc)
+        levels=[
+          {"Level":4,"Kanji Total":36,"Lessons Total":100,"Gate Lessons Remaining":6,"Lessons Remaining":78,"Kanji To Guru":23},
+          {"Level":5,"Kanji Total":43,"Lessons Total":220,"Gate Lessons Remaining":66,"Lessons Remaining":213,"Kanji To Guru":42},
+          {"Level":6,"Kanji Total":37,"Lessons Total":180,"Gate Lessons Remaining":54,"Lessons Remaining":183,"Kanji To Guru":33}]
+        bound=now+timedelta(days=4)
+        target=forecast_with_inventory(levels,4,7,15,now,bound)
+        self.assertEqual(target,(now+timedelta(days=18)).date())
+        full=forecast_full_lessons(levels,4,7,15,now,target)
+        self.assertEqual(full,(now+timedelta(days=32)).date())
+        self.assertIsNone(forecast_with_inventory(levels,4,7,0,now,bound))
+        self.assertIsNone(forecast_with_inventory(levels,4,8,15,now,bound))
+
+    def test_actual_eta_with_zero_pace_must_be_blank(self):
+        from sync import choose_eta_rate
+        from wk_detailed import forecast_with_inventory
+        now=datetime(2026,10,18,15,tzinfo=timezone.utc)
+        speed,source=choose_eta_rate(0,0,15)
+        self.assertIsNone(speed)
+        self.assertEqual(source,"no_new_lessons_since_tracking_start")
+        self.assertIsNone(forecast_with_inventory(
+            [{"Level":4,"Kanji Total":36,"Lessons Total":100,"Gate Lessons Remaining":6}],
+            4,5,speed,now))
+
 
 if __name__ == '__main__':
     unittest.main()

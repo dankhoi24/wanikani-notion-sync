@@ -165,6 +165,58 @@ class SyncTests(unittest.TestCase):
                     "Vocab 7d Avg","Gate 7d Avg"):
             self.assertEqual(activity[key],0)
 
+    def test_unlock_forecast_apprentice4_prerequisites_only(self):
+        from unlock_forecast import estimate_unlocks_today,unlock_cards
+        now=datetime(2026,10,18,18,tzinfo=timezone.utc) # 19/10 01:00 VN
+        subjects={
+          1:{"type":"radical","level":4,"component_subject_ids":[]},
+          2:{"type":"radical","level":4,"component_subject_ids":[]},
+          3:{"type":"kanji","level":4,"component_subject_ids":[1,2]},
+          4:{"type":"vocabulary","level":4,"component_subject_ids":[3]},
+          5:{"type":"vocabulary","level":4,"component_subject_ids":[1]},
+          6:{"type":"vocabulary","level":4,"component_subject_ids":[2]},
+          7:{"type":"kanji","level":4,"component_subject_ids":[1]},
+          8:{"type":"kanji","level":5,"component_subject_ids":[1]},
+          9:{"type":"vocabulary","level":4,"component_subject_ids":[12]},
+          10:{"type":"vocabulary","level":4,"component_subject_ids":[13]},
+          12:{"type":"kanji","level":4,"component_subject_ids":[]},
+          13:{"type":"kanji","level":4,"component_subject_ids":[]}
+        }
+        assignments={
+           1:{"passed_at":"2026-10-14T00:00:00Z","srs_stage":5},
+           2:{"srs_stage":4,"available_at":"2026-10-19T05:00:00Z"},
+           3:{"srs_stage":3,"started_at":"2026-10-18T10:00:00Z"},
+           4:{"srs_stage":0},
+           5:{"unlocked_at":"2026-10-14T00:00:00Z"},
+           6:{"srs_stage":0},
+           7:{"srs_stage":0},
+           9:{"srs_stage":0},
+           10:{"srs_stage":0},
+           12:{"srs_stage":4,"available_at":"2026-10-19T17:30:00Z"},
+           13:{"srs_stage":3,"available_at":"2026-10-19T04:00:00Z"}
+        }
+        estimated=estimate_unlocks_today(subjects,assignments,4,now,"Asia/Ho_Chi_Minh")
+        self.assertEqual(estimated["date"],date(2026,10,19))
+        self.assertEqual(estimated["available_now"],1)
+        self.assertEqual(estimated["potential_today"],1)
+        self.assertEqual(estimated["by_type"]["vocabulary"],1)
+        self.assertEqual(estimated["by_type"]["kanji"],0)
+        self.assertEqual(estimated["first_unlock_at"],
+                         datetime(2026,10,19,5,tzinfo=timezone.utc))
+        cards=unlock_cards(estimated,"Asia/Ho_Chi_Minh")
+        self.assertIn("1 bài",cards["LESSONS CÓ THỂ MỞ KHÓA HÔM NAY"])
+        self.assertIn("12:00",cards["MỞ KHÓA SỚM NHẤT"])
+
+    def test_unlock_forecast_no_guess_for_missing_review_time(self):
+        from unlock_forecast import estimate_unlocks_today
+        now=datetime(2026,10,18,18,tzinfo=timezone.utc)
+        s={1:{"type":"radical","level":4,"component_subject_ids":[]},
+           2:{"type":"kanji","level":4,"component_subject_ids":[1]}}
+        a={1:{"srs_stage":4,"available_at":None}}
+        f=estimate_unlocks_today(s,a,4,now,"Asia/Ho_Chi_Minh")
+        self.assertEqual(f["potential_today"],0)
+        self.assertIsNone(f["first_unlock_at"])
+
     def test_volume_and_target_projection(self):
         from sync import lessons_per_level,workload_eta
         history=[{"data":{"level":i,"started_at":f"2026-09-{d:02d}T00:00:00Z"}} for i,d in [(1,1),(2,11),(3,21)]]

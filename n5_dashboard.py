@@ -67,7 +67,7 @@ def card_values(level, target, milestone, gate, activity, counts, review,
     else:
         reviews_label=f"≈ {number_label(review_count)} review"
     result = {
-        "LESSONS HÔM NAY": f"{int(daily_lessons)} / {configured_target} bài · {pct:.0f}%\\n{bar(pct)}",
+        "LESSONS HÔM NAY": f"{int(daily_lessons)} / {configured_target} bài · {pct:.0f}%\n{bar(pct)}",
         "REVIEWS HÔM NAY · ƯỚC TÍNH": reviews_label,
         "LESSONS HÔM NAY THEO LOẠI": (
             f"Radical {activity.get('Radical Lessons Today',0)} · "

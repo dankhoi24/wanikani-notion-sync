@@ -8,6 +8,12 @@ This repository synchronizes WaniKani v2 statistics to a private Notion dashboar
 - [WaniKani Snapshots](https://app.notion.com/p/67adf543c29941c894b9379bc5542ad5) — data source `a35d8794-a5c6-4208-ab52-b21d793bf010`
 - [JLPT Milestones](https://app.notion.com/p/722a67ebb36e4d819fdd09d8fd03fc05) — data source `b45e8463-c10a-4d95-88c3-e43eaa260290`
 
+## Daily target is editable in Notion
+
+Update [Learning Settings](https://app.notion.com/p/cff5db14491e4289bb4840e822796a23), row **Configuration**, property **Daily Lessons Target** (currently 15). Counts include radical, kanji, vocabulary, and kana vocabulary based on `assignments.data.started_at`. This is an observed lesson-start proxy, not the WaniKani recommended-daily-lessons website setting. WaniKani 7/30-day averages include days with zero lessons, in the timezone defined in that row. The target is read every run; no Python edits needed. Grant the GitHub Notion integration access to Learning Settings as well as the other databases.
+
+**ETA** now uses historical lessons started between adjacent level starts (minimum two valid intervals), the recent 30-day actual lessons/day (when >=1), and a minimum 7 days/level. **Target ETA** is an optimistic scenario at the configured daily target. Both are workload approximations, not kanji Guru unlock predictions or JLPT eligibility. With insufficient data, ETA stays blank. Older records remain unchanged until the next sync.
+
 ## 1. Get your WaniKani token (read-only)
 
 Open https://www.wanikani.com/settings/personal_access_tokens , create a v2 API token. **Do not enable any write/update permissions**. Copy the token into a password manager temporarily.
@@ -42,7 +48,7 @@ In the new repo open `Settings → Secrets and variables → Actions → Secrets
 | `WK_TOKEN` | WaniKani API v2 read-only token |
 | `NOTION_TOKEN` | Token of the new `WK Notion Sync` Notion integration |
 
-Do not put tokens in `sync.py`, README, workflow YAML, Git commits, screenshots, chat messages, or Actions logs. The two Notion data source IDs are already configured inside the workflow; they are identifiers, not secrets.
+Do not put tokens in `sync.py`, README, workflow YAML, Git commits, screenshots, chat messages, or Actions logs. The three Notion data source IDs are already configured inside the workflow; they are identifiers, not secrets.
 
 ## 5. Test first run
 
@@ -62,7 +68,7 @@ See the Actions log if it fails:
 
 The workflow runs at `00:17`, `06:17`, `12:17`, `18:17` UTC (in Viet Nam at **07:17, 13:17, 19:17, 01:17**). GitHub schedules can be delayed or occasionally missed, and only run from the default branch. Manual `Run workflow` is always available.
 
-Edit `milestones.json` to change the **configurable WaniKani proxy levels**. The supplied values 10/20/30 are **examples only**, not official JLPT correspondence. N5/N4/N3 additionally require grammar, listening, reading, and mock-test preparation. WaniKani alone cannot certify JLPT readiness. The forecast uses median durations of up to 10 most recent consecutive level transitions, but gaps due to breaks/resets may affect the ETA.
+Edit `milestones.json` to change the **configurable WaniKani proxy levels**. The supplied values 10/20/30 are **examples only**, not official JLPT correspondence. N5/N4/N3 additionally require grammar, listening, reading, and mock-test preparation. WaniKani alone cannot certify JLPT readiness. Historical median days per level remains visible for reference only; the new model estimates lesson workload.
 
 Metrics:
 

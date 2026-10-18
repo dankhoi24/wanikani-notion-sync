@@ -217,6 +217,61 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(f["potential_today"],0)
         self.assertIsNone(f["first_unlock_at"])
 
+    def test_review_today_approx_uses_last_pre_midnight_checkpoint(self):
+        from daily_reviews import (most_recent_before_midnight,
+                                   estimate_reviews_today)
+        now=datetime(2026,10,18,17,21,tzinfo=timezone.utc)
+        def checkpoint(at,meaning_correct):
+            return {"properties":{
+                "Captured At":{"date":{"start":at}},
+                "Meaning Correct Total":{"number":meaning_correct},
+                "Meaning Incorrect Total":{"number":306},
+                "Reading Correct Total":{"number":3913},
+                "Reading Incorrect Total":{"number":500}
+            }}
+        before=checkpoint("2026-10-18T16:31:00Z",3912)
+        after=checkpoint("2026-10-18T17:01:00Z",3913)
+        prior=checkpoint("2026-10-17T16:00:00Z",3900)
+        rows=[prior,after,before]
+        baseline=most_recent_before_midnight(rows,now,"Asia/Ho_Chi_Minh")
+        self.assertIs(baseline,before)
+        counters={"meaning_correct":3913,"meaning_incorrect":306,
+                  "reading_correct":3913,"reading_incorrect":500}
+        estimate=estimate_reviews_today(counters,baseline,now,"Asia/Ho_Chi_Minh")
+        self.assertEqual(estimate["Reviews Today Approx"],1)
+        self.assertIn("18/10/2026 23:31",estimate["Reviews Today Window"])
+        self.assertIn("KHÔNG phải",estimate["Reviews Today Window"])
+
+    def test_review_today_unknown_without_baseline_or_counter_reset(self):
+        from daily_reviews import estimate_reviews_today
+        now=datetime(2026,10,18,17,21,tzinfo=timezone.utc)
+        counters={"meaning_correct":5,"meaning_incorrect":0,
+                  "reading_correct":5,"reading_incorrect":0}
+        self.assertIsNone(estimate_reviews_today(
+            counters,None,now,"Asia/Ho_Chi_Minh")["Reviews Today Approx"])
+        old={"properties":{
+            "Captured At":{"date":{"start":"2026-10-18T16:31:00Z"}},
+            "Meaning Correct Total":{"number":6},
+            "Meaning Incorrect Total":{"number":0},
+            "Reading Correct Total":{"number":5},
+            "Reading Incorrect Total":{"number":0}
+        }}
+        self.assertIsNone(estimate_reviews_today(
+            counters,old,now,"Asia/Ho_Chi_Minh")["Reviews Today Approx"])
+
+    def test_n5_today_cards_display_lesson_goal_and_approx_reviews(self):
+        from n5_dashboard import card_values
+        now=datetime(2026,10,18,17,21,tzinfo=timezone.utc)
+        a={"Lessons Today":15,"Radical Lessons Today":2,
+           "Kanji Lessons Today":3,"Vocab Lessons Today":10}
+        cards,_=card_values(4,10,{}, {}, a, {}, {}, now,
+                            "Asia/Ho_Chi_Minh",daily_target=15,
+                            daily_reviews={"Reviews Today Approx":7})
+        self.assertIn("15 / 15",cards["LESSONS HÔM NAY"])
+        self.assertIn("100%",cards["LESSONS HÔM NAY"])
+        self.assertEqual(cards["REVIEWS HÔM NAY · ƯỚC TÍNH"],"≈ 7 review")
+        self.assertIn("Kanji 3",cards["LESSONS HÔM NAY THEO LOẠI"])
+
     def test_volume_and_target_projection(self):
         from sync import lessons_per_level,workload_eta
         history=[{"data":{"level":i,"started_at":f"2026-09-{d:02d}T00:00:00Z"}} for i,d in [(1,1),(2,11),(3,21)]]

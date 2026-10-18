@@ -162,3 +162,56 @@ def review_delta(current,base,previous):
             "Reading Accuracy New":round(100*since["reading_correct"]/reading,2) if reading else None,
             "Review Accuracy New":round(100*(since["meaning_correct"]+since["reading_correct"])/total,2) if total else None,
             "Counter Valid":True}
+
+def forecast_with_inventory(rows, current_level, target_level, lessons_per_day, now,
+                            current_gate_earliest=None, future_srs_floor_days=7):
+    """Optimistic date for reaching a WaniKani level using exact subject counts.
+
+    For each intervening level, account for remaining prerequisite radical/kanji
+    lessons and a SRS latency floor. Future-level SRS latency is a documented
+    HEURISTIC, not a guaranteed review schedule. The current level instead
+    uses earliest_next_gate's individual assignment/SRS lower bound.
+    This assumes lessons can prioritize the level-up critical path; doing
+    vocabulary in the same 15-lesson budget may delay the date.
+    """
+    if target_level <= current_level:
+        return now.date()
+    if lessons_per_day is None or lessons_per_day <= 0:
+        return None
+    indexed={r["Level"]:r for r in rows}
+    elapsed=0.0
+    for level in range(current_level,target_level):
+        row=indexed.get(level)
+        if not row or row.get("Lessons Total",0)<=0 or row.get("Kanji Total",0)<=0:
+            return None
+        workload=max(0,row["Gate Lessons Remaining"])/lessons_per_day
+        if level==current_level and current_gate_earliest is not None:
+            latency=max(0,(current_gate_earliest-now).total_seconds()/86400)
+        elif level==current_level and row["Kanji To Guru"]==0:
+            latency=0
+        else:
+            latency=future_srs_floor_days
+        elapsed+=max(workload,latency)
+    return (now+timedelta(days=math.ceil(elapsed))).date()
+
+
+def forecast_full_lessons(rows, current_level, target_level, lessons_per_day, now,
+                          gate_eta=None):
+    """Optimistic LOWER BOUND to start all lessons below the target level.
+
+    Includes vocabulary (not required for level up), and cannot precede
+    the level-up gate estimate. Real unlock dependencies may add more delay.
+    """
+    if target_level<=current_level:
+        return now.date()
+    if lessons_per_day is None or lessons_per_day<=0:
+        return None
+    indexed={r["Level"]:r for r in rows}
+    scope=[]
+    for level in range(current_level,target_level):
+        row=indexed.get(level)
+        if not row or row.get("Lessons Total",0)<=0:
+            return None
+        scope.append(row)
+    minimum=(now+timedelta(days=math.ceil(sum(x["Lessons Remaining"] for x in scope)/lessons_per_day))).date()
+    return max(minimum,gate_eta) if gate_eta else minimum

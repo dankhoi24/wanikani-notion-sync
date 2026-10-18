@@ -6,7 +6,8 @@ import sys
 import time
 from collections import Counter
 from wk_detailed import (subjects_by_id,assignments_by_id,inventory,milestone_inventory,
-                         review_counters,review_delta,earliest_next_gate,intervals_from_srs)
+                         review_counters,review_delta,earliest_next_gate,intervals_from_srs,
+                         forecast_with_inventory,forecast_full_lessons)
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -184,7 +185,7 @@ def choose_eta_rate(seven_day, thirty_day, target):
         return seven_day, "observed_recent_7d"
     if thirty_day is not None and thirty_day > 0:
         return thirty_day, "observed_30d_fallback"
-    return target, "target_only_provisional"
+    return None, "no_new_lessons_since_tracking_start"
 
 
 def learning_settings(source_id,token):
@@ -260,7 +261,7 @@ def main():
                      "Enlightened", "Burned", "Accuracy Pct", "Reviews Now", "Reviews Next 24h"]
     validate_source(snaps_id, {"Name", "Synced At", "Level", "Days Per Level", "Daily Target","Lessons Today","Lessons 7d Avg","Lessons 30d Avg","Vocab 7d Avg","Vocab 30d Avg","Target Hit 7d Pct","Actual Pace Days/Level", *field_metrics}, notion_token)
     validate_source(milestones_id, {"Milestone", "Target WK Level", "Start", "ETA",
-                                    "Days Left", "Progress Pct", "Basis","Target ETA","Actual Pace","Lessons/Level","Recent Pace (7d)"}, notion_token)
+                                    "Days Left", "Progress Pct", "Basis","Target ETA","Actual Pace","Lessons/Level","Recent Pace (7d)","ETA Status","Target Full Lessons ETA","Forecast Method"}, notion_token)
     settings_id = required("NOTION_SETTINGS_DATA_SOURCE_ID")
     validate_source(settings_id, {"Name","Daily Lessons Target","Timezone","Tracking Start"}, notion_token)
     daily_target,tz,tracking_start = learning_settings(settings_id,notion_token)
@@ -325,7 +326,7 @@ def main():
     actual=activity["Lessons 30d Avg"]
     rate_for_eta,rate_source=choose_eta_rate(activity["Lessons 7d Avg"],actual,daily_target)
     actual_pace=(round(max(7,volume/rate_for_eta),2)
-                 if volume is not None and rate_source!="target_only_provisional" else None)
+                 if volume is not None and rate_for_eta is not None else None)
     gate=levels[0] if levels else {}
     key = now.strftime("WK %Y-%m-%d UTC")
     snap = props("Name", key, {"Level": level, "Days Per Level": pace, **counts,
@@ -346,7 +347,7 @@ def main():
                  "Available Lessons":gate.get("Lessons Available")},
                  
                  dates={"Synced At": now})
-    print(f"WaniKani level={level}; target={daily_target} lessons/day; actual 7d={activity['Lessons 7d Avg']}, 30d={actual}; estimated lessons/level={volume}, samples={samples}")
+    print(f"WaniKani level={level}; target={daily_target}; 7d={activity['Lessons 7d Avg']}; 30d={actual}; per-level inventory used for forecast")
     print("Snapshot", upsert(snaps_id, "Name", key, snap, notion_token))
     config = target_config
     srs_intervals=intervals_from_srs(collection("spaced_repetition_systems",wk_token))
@@ -357,24 +358,39 @@ def main():
             raise ValueError("Milestone target must be a WaniKani level 1..60")
         title = item["name"]
         eta = (forecast(target,level,None,None,now,progressions) if level>=target
-               else workload_eta(target,level,volume,rate_for_eta,current_started,started_at,now))
-        target_eta = (eta if level>=target else workload_eta(target,level,volume,daily_target,current_started,started_at,now))
+               else forecast_with_inventory(levels,level,target,rate_for_eta,now,earliest_gate))
+        target_eta = (eta if level>=target else
+                      forecast_with_inventory(levels,level,target,daily_target,now,earliest_gate))
+        full_target_eta = forecast_full_lessons(levels,level,target,daily_target,now,target_eta)
+        eta_status = ("Achieved" if level >= target else
+                      "Paused: 0 new lessons/day" if rate_for_eta is None else
+                      "Recent pace: 7-day" if rate_source=="observed_recent_7d" else
+                      "Recent pace: 30-day fallback")
+        method=("Per-level Gate Lessons Remaining + current Guru/SRS dates; "
+                "7-day optimistic lower bound per future level; "
+                "Full Lessons includes vocabulary, all subjects below target. "
+                "Zero actual pace has no finite ETA. "
+                "Review accuracy is tracked separately and not treated as ETA probability.")
         days_left = max(0, (eta - now.date()).days) if eta else None
-        basis = (f"WaniKani level proxy, not JLPT readiness. "
-                 f"Historical lesson volume/level={volume} from {samples} intervals; "
-                 f"actual 30d lessons/day={actual}; recent 7d={activity['Lessons 7d Avg']}; target={daily_target}; "
-                 f"tracking start={tracking_start}; elapsed days={activity['Elapsed Days']}; "
-                 f"ETA rate={rate_for_eta} ({rate_source}); "
-                 f"7d active days={activity['Active Days 7d']}. "
-                 f"Workload estimate only; ETA may be provisional, minimum 7 days per level for SRS; "
-                 f"cannot predict kanji Guru timing precisely.")
+        basis=(f"WaniKani level proxy, NOT JLPT readiness. "
+               f"Actual lessons/day 7d={activity['Lessons 7d Avg']}, 30d={actual}; "
+               f"ETA rate={rate_for_eta} ({rate_source}); target rate={daily_target}; "
+               f"tracking from {tracking_start}. "
+               f"Exact remaining subjects and gate estimates from WaniKani API; "
+               f"current-level SRS lower bound={earliest_gate}; "
+               f"future-level SRS floor=7 days (optimistic heuristic). "
+               f"New review accuracy={review['Review Accuracy New']}. "
+               f"No artificial 141-lessons-per-level multiplier. "
+               f"All dates are provisional and do not prove JLPT readiness.")
         extra=milestone_inventory(levels,level,target)
         properties = props("Milestone", title,
                            {"Target WK Level": target, "Progress Pct": round(min(100,level/target*100),1),
                             "Days Left": days_left,"Actual Pace":actual,"Recent Pace (7d)":activity["Lessons 7d Avg"],"Lessons/Level":volume,
                             "Review Accuracy New":review["Review Accuracy New"],**extra},
                            dates={"Start": tracking_start, "ETA": eta, "Target ETA":target_eta,
-                                  "Next Gate Earliest":earliest_gate}, rich={"Basis": basis})
+                                  "Target Full Lessons ETA":full_target_eta,
+                                  "Next Gate Earliest":earliest_gate},
+                           rich={"Basis": basis,"ETA Status":eta_status,"Forecast Method":method})
         print(title, upsert(milestones_id, "Milestone", title, properties, notion_token),
               "ETA:", eta or "insufficient history")
     print("Success: Notion has been synchronized.")

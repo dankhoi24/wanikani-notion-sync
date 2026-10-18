@@ -7,6 +7,7 @@ on:
       - 'sync.py'
       - 'n5_dashboard.py'
       - 'daily_reviews.py'
+      - 'daily_lessons.py'
       - 'unlock_forecast.py'
       - 'wk_detailed.py'
       - 'tests/**'
@@ -36,6 +37,7 @@ jobs:
           WK_TOKEN: ${{ secrets.WK_TOKEN }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_SNAPSHOTS_DATA_SOURCE_ID: a35d8794-a5c6-4208-ab52-b21d793bf010
+          NOTION_DAILY_LESSONS_DATA_SOURCE_ID: da3a4ad9-ff3c-41eb-8733-68a4a31a1ec7
           NOTION_MILESTONES_DATA_SOURCE_ID: b45e8463-c10a-4d95-88c3-e43eaa260290
           NOTION_N5_DASHBOARD_PAGE_ID: 3fd98ffb213081b79341d760e45cdf60
           NOTION_SETTINGS_DATA_SOURCE_ID: d45e078f-eaca-4631-a908-b0a4bbb8ac07

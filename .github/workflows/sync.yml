@@ -26,4 +26,5 @@ jobs:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_SNAPSHOTS_DATA_SOURCE_ID: a35d8794-a5c6-4208-ab52-b21d793bf010
           NOTION_MILESTONES_DATA_SOURCE_ID: b45e8463-c10a-4d95-88c3-e43eaa260290
+          NOTION_SETTINGS_DATA_SOURCE_ID: d45e078f-eaca-4631-a908-b0a4bbb8ac07
         run: python sync.py

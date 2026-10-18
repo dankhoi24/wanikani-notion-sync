@@ -47,7 +47,7 @@ class SyncTests(unittest.TestCase):
 
     def test_dynamic_activity(self):
         from sync import lesson_activity,lessons_per_level,workload_eta
-        now=datetime(2026,10,18,17,tzinfo=timezone.utc)
+        now=datetime(2026,10,18,16,30,tzinfo=timezone.utc)
         assignments=[{"data":{"subject_type":"vocabulary","started_at":"2026-10-18T16:00:00Z"}},
                      {"data":{"subject_type":"radical","started_at":"2026-10-17T16:00:00Z"}},
                      {"data":{"subject_type":"kanji","started_at":None}}]

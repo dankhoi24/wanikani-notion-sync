@@ -1,0 +1,29 @@
+name: Sync WaniKani to Notion
+on:
+  workflow_dispatch:
+  schedule:
+    # Times UTC: 07:17, 13:17, 19:17, 01:17 in Viet Nam.
+    - cron: '17 0,6,12,18 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: wanikani-notion-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Update the Notion dashboard
+        env:
+          WK_TOKEN: ${{ secrets.WK_TOKEN }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_SNAPSHOTS_DATA_SOURCE_ID: a35d8794-a5c6-4208-ab52-b21d793bf010
+          NOTION_MILESTONES_DATA_SOURCE_ID: b45e8463-c10a-4d95-88c3-e43eaa260290
+        run: python sync.py

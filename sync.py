@@ -270,6 +270,10 @@ def main():
     progressions = collection("level_progressions", wk_token)
     stats = collection("review_statistics?subject_types=kanji,vocabulary", wk_token)
     summary = wk("summary", wk_token)["data"]
+    validate_source(required("NOTION_LEVEL_BREAKDOWN_DATA_SOURCE_ID"),
+                    {"Name","Level","Lessons Remaining","Kanji To Guru","Min Reviews to Gate"},notion_token)
+    validate_source(required("NOTION_REVIEW_CHECKPOINTS_DATA_SOURCE_ID"),
+                    {"Name","Captured At","Meaning Correct Total","Reviews Since Baseline"},notion_token)
     subject_rows = collection("subjects", wk_token)
     subjects = subjects_by_id(subject_rows)
     assigned = assignments_by_id(assignments)
@@ -292,7 +296,10 @@ def main():
             ("reading_correct","Reading Correct Total"),
             ("reading_incorrect","Reading Incorrect Total"))}
     checkpoint_previous=old_counts(previous_rows[0]) if previous_rows else counters
-    checkpoint_base=old_counts(previous_rows[-1]) if previous_rows else counters
+    # Keep the baseline checkpoint stable even when >100 checkpoints exist.
+    baseline_rows=notion("POST",f"/data_sources/{checkpoints_id}/query",notion_token,
+                         {"page_size":1,"sorts":[{"property":"Captured At","direction":"ascending"}]})["results"]
+    checkpoint_base=old_counts(baseline_rows[0]) if baseline_rows else counters
     review=review_delta(counters,checkpoint_base,checkpoint_previous)
     checkpoint=props("Name",now.strftime("Checkpoint %Y-%m-%d %H:%M UTC"),{
         "Meaning Correct Total":counters["meaning_correct"],

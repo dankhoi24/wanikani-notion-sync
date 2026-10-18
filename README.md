@@ -92,3 +92,15 @@ python -m unittest discover -s tests -v
 Keep the repository private. Limit collaborators because people with write access may be able to modify workflows that consume secrets. Rotate tokens if leaked. Notion integrations need direct permission to the relevant pages/databases. No need to send a WaniKani or Notion API token to ChatGPT.
 
 Useful references: https://docs.api.wanikani.com/20170710/ · https://developers.notion.com/reference/intro · https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets
+
+
+## Detailed course progress and review accuracy (new)
+
+- [WaniKani Level Breakdown](https://app.notion.com/p/68ff00960f4d4bd5b15f490beea350ee): counts subjects in each accessible WaniKani level, lessons started/unstarted, unlocked/locked lessons, the 90% Kanji Guru level-up gate, and an **optimistic minimum** number of required future reviews to Guru.
+- [WaniKani Review Checkpoints](https://app.notion.com/p/6e19821f815c4b23a9330485828e94b9): saves totals from `review_statistics` each sync, then calculates differences from the **first recorded checkpoint** and preceding sync. **The API does not expose an event-by-event review history; `Reviews Since Baseline` is a LOWER BOUND proxy of correct meaning answers, NOT the exact number of review sessions completed.** Accuracy is computed from counter differences of correct/incorrect meaning and reading answers. First checkpoint has no history and new accuracy is blank.
+- `Next Gate Earliest` is a best-case SRS lower bound for the **current** level, assuming reviews and lessons are done immediately with no mistakes. This is not an expected ETA.
+- `Remaining Lessons (Full)` counts all unstarted subjects from current level up to, **but not including**, the requested milestone level. `Gate Lessons Remaining` counts kanji and prerequisite radicals needed for Guru progression, without vocabulary. These differ by design.
+- Future levels may be inaccessible through a WaniKani account's subscription/API access. Empty catalog results cannot be interpreted as zero required lessons. Completion estimates need validated accessible subject counts.
+- The projected `ETA` and `Target ETA` still rely on the historical workload model and must not be read as a verified SRS-aware date. Accuracy is diagnostic, not a numeric probability for ETA.
+
+For the two new databases, the GitHub Notion integration needs Read/Insert/Update access. Their data source IDs are in the workflow YAML.

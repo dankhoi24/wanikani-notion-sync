@@ -51,11 +51,22 @@ class SyncTests(unittest.TestCase):
         assignments=[{"data":{"subject_type":"vocabulary","started_at":"2026-10-18T16:00:00Z"}},
                      {"data":{"subject_type":"radical","started_at":"2026-10-17T16:00:00Z"}},
                      {"data":{"subject_type":"kanji","started_at":None}}]
-        stats,starts=lesson_activity(assignments,now,"Asia/Ho_Chi_Minh")
+        stats,starts=lesson_activity(assignments,now,"Asia/Ho_Chi_Minh",date(2026,10,17))
         self.assertEqual(stats["Lessons Today"],1)
-        self.assertEqual(stats["Lessons 7d Avg"],round(2/7,2))
-        self.assertEqual(stats["Vocab 7d Avg"],round(1/7,2))
+        self.assertEqual(stats["Lessons 7d Avg"],1.0)
+        self.assertEqual(stats["Vocab 7d Avg"],0.0)
         self.assertIsNone(workload_eta(10,4,None,15,None,starts,now))
+
+    def test_tracking_starts_today(self):
+        from sync import lesson_activity
+        now=datetime(2026,10,18,16,30,tzinfo=timezone.utc)
+        assignments=[{"data":{"subject_type":"vocabulary","started_at":"2026-10-18T15:00:00Z"}},
+                     {"data":{"subject_type":"vocabulary","started_at":"2026-10-17T15:00:00Z"}}]
+        data,_=lesson_activity(assignments,now,"Asia/Ho_Chi_Minh",date(2026,10,18))
+        self.assertEqual(data["Lessons Today"],1)
+        self.assertIsNone(data["Lessons 7d Avg"])
+        self.assertIsNone(data["Lessons 30d Avg"])
+        self.assertEqual(data["Completed Days"],0)
 
     def test_volume_and_target_projection(self):
         from sync import lessons_per_level,workload_eta

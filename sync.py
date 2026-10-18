@@ -7,6 +7,8 @@ import time
 from collections import Counter
 from n5_dashboard import card_values, update_n5_dashboard
 from unlock_forecast import estimate_unlocks_today, unlock_cards
+from daily_reviews import (most_recent_before_midnight, day_start_utc,
+                           estimate_reviews_today)
 from wk_detailed import (subjects_by_id,assignments_by_id,inventory,milestone_inventory,
                          review_counters,review_delta,earliest_next_gate,intervals_from_srs,
                          forecast_with_inventory,forecast_full_lessons)
@@ -282,7 +284,7 @@ def main():
                                required("NOTION_MILESTONES_DATA_SOURCE_ID"))
     field_metrics = ["Learned Kanji", "Learned Vocab", "Apprentice", "Guru", "Master",
                      "Enlightened", "Burned", "Accuracy Pct", "Reviews Now", "Reviews Next 24h"]
-    validate_source(snaps_id, {"Name", "Synced At", "Level", "Days Per Level", "Daily Target","Lessons Today","Lessons 7d Avg","Lessons 30d Avg","Vocab 7d Avg","Vocab 30d Avg","Radical 7d Avg","Kanji 7d Avg","Radical 30d Avg","Kanji 30d Avg","Gate 7d Avg","Gate 30d Avg","Radical Lessons Today","Kanji Lessons Today","Vocab Lessons Today","Target Hit 7d Pct","Actual Pace Days/Level", *field_metrics}, notion_token)
+    validate_source(snaps_id, {"Name", "Synced At", "Level", "Days Per Level", "Daily Target","Lessons Today","Lessons 7d Avg","Lessons 30d Avg","Vocab 7d Avg","Vocab 30d Avg","Radical 7d Avg","Kanji 7d Avg","Radical 30d Avg","Kanji 30d Avg","Gate 7d Avg","Gate 30d Avg","Radical Lessons Today","Kanji Lessons Today","Vocab Lessons Today","Target Hit 7d Pct","Actual Pace Days/Level", "Reviews Today Approx", "Reviews Today Window", *field_metrics}, notion_token)
     validate_source(milestones_id, {"Milestone", "Target WK Level", "Start", "ETA",
                                     "Days Left", "Progress Pct", "Basis","Target ETA","Actual Pace","Lessons/Level","Recent Pace (7d)","ETA Status","Target Full Lessons ETA","Actual Full Lessons ETA","Gate Pace (7d)","Gate Pace (30d)","Radical Pace (7d)","Kanji Pace (7d)","Vocab Pace (7d)","Full ETA Status","Forecast Method"}, notion_token)
     settings_id = required("NOTION_SETTINGS_DATA_SOURCE_ID")
@@ -325,6 +327,18 @@ def main():
                          {"page_size":1,"sorts":[{"property":"Captured At","direction":"ascending"}]})["results"]
     checkpoint_base=old_counts(baseline_rows[0]) if baseline_rows else counters
     review=review_delta(counters,checkpoint_base,checkpoint_previous)
+    # GET /reviews no longer contains sessions. Compute a labeled approximation
+    # from cumulative meaning-correct count at the last pre-midnight checkpoint.
+    # This can include activity in the interval just before local midnight.
+    before_midnight=most_recent_before_midnight(previous_rows,now,tz)
+    if before_midnight is None:
+        midnight=day_start_utc(now,tz).isoformat().replace("+00:00","Z")
+        older=notion("POST",f"/data_sources/{checkpoints_id}/query",notion_token,{
+            "page_size":1,
+            "filter":{"property":"Captured At","date":{"before":midnight}},
+            "sorts":[{"property":"Captured At","direction":"descending"}]})
+        before_midnight=(older.get("results") or [None])[0]
+    daily_reviews=estimate_reviews_today(counters,before_midnight,now,tz)
     checkpoint=props("Name",now.strftime("Checkpoint %Y-%m-%d %H:%M UTC"),{
         "Meaning Correct Total":counters["meaning_correct"],
         "Meaning Incorrect Total":counters["meaning_incorrect"],
@@ -376,6 +390,7 @@ def main():
                  "Actual Pace Days/Level":actual_pace,
                  "Reviews Done (Tracked)":review["Reviews Since Baseline"],
                  "Reviews Last Sync":review["Reviews Since Last Sync"],
+                 "Reviews Today Approx":daily_reviews["Reviews Today Approx"],
                  "Review Accuracy (Tracked)":review["Review Accuracy New"],
                  "Meaning Accuracy (Tracked)":review["Meaning Accuracy New"],
                  "Reading Accuracy (Tracked)":review["Reading Accuracy New"],
@@ -383,7 +398,8 @@ def main():
                  "Next Level Gate Reviews":gate.get("Min Reviews to Gate"),
                  "Available Lessons":gate.get("Lessons Available")},
                  
-                 dates={"Synced At": now})
+                 dates={"Synced At": now},
+                 rich={"Reviews Today Window":daily_reviews["Reviews Today Window"]})
     print(f"WaniKani level={level}; target={daily_target}; full7d={activity['Lessons 7d Avg']}; gate7d={activity['Gate 7d Avg']}; radical7d={activity['Radical 7d Avg']}; kanji7d={activity['Kanji 7d Avg']}; vocab7d={activity['Vocab 7d Avg']}; inventory ETA")
     print("Snapshot", upsert(snaps_id, "Name", key, snap, notion_token))
     config = target_config
@@ -463,7 +479,8 @@ def main():
                 {**extra, "ETA":eta, "Target ETA":target_eta,
                  "Actual Full Lessons ETA":actual_full_eta,
                  "Target Full Lessons ETA":full_target_eta},
-                gate, activity, counts, review, now, tz)
+                gate, activity, counts, review, now, tz,
+                daily_target=daily_target, daily_reviews=daily_reviews)
             cards.update(unlock_cards(unlock_estimate,tz))
             updates=update_n5_dashboard(notion, notion_token, n5_dashboard_id,
                                         cards, stamp)

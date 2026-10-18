@@ -116,6 +116,74 @@ def metrics(assignments, review_stats, summary, now):
             "Reviews Now": due_now, "Reviews Next 24h": due_24}
 
 
+def lesson_activity(assignments, now, tz):
+    from zoneinfo import ZoneInfo
+    today=now.astimezone(ZoneInfo(tz)).date()
+    daily=Counter()
+    vocab=Counter()
+    starts=[]
+    for item in assignments:
+        data=item.get("data", {})
+        at=iso_dt(data.get("started_at"))
+        if at is None or at > now:
+            continue
+        starts.append(at)
+        day=at.astimezone(ZoneInfo(tz)).date()
+        daily[day]+=1
+        if data.get("subject_type") in ("vocabulary","kana_vocabulary"):
+            vocab[day]+=1
+    def avg(counter,n):
+        return round(sum(counter[today-timedelta(days=i)] for i in range(n))/n,2)
+    return {
+      "Lessons Today":daily[today],"Lessons 7d Avg":avg(daily,7),
+      "Lessons 30d Avg":avg(daily,30),"Vocab 7d Avg":avg(vocab,7),
+      "Vocab 30d Avg":avg(vocab,30),
+      "Active Days 7d":sum(daily[today-timedelta(days=i)]>0 for i in range(7))
+    },starts
+
+
+def lessons_per_level(starts, progressions):
+    transitions=sorted((iso_dt(d["started_at"]), d["level"])
+        for p in progressions for d in [p.get("data",{})]
+        if d.get("started_at") and isinstance(d.get("level"),int))
+    volumes=[]
+    for (a,level),(b,next_level) in zip(transitions,transitions[1:]):
+        if next_level != level+1 or b <= a:
+            continue
+        volume=sum(a<=s<b for s in starts)
+        if volume >= 5:
+            volumes.append(volume)
+    return (round(statistics.median(volumes[-5:]),2),len(volumes)) if len(volumes)>=2 else (None,len(volumes))
+
+
+def workload_eta(target,level,volume,rate,current_start,starts,now):
+    # Approximate, not a WaniKani Guru-unlock or JLPT readiness forecast.
+    if target<=level:
+        return now.date()
+    if volume is None or rate is None or rate < 1:
+        return None
+    current_done=sum(current_start<=s<=now for s in starts) if current_start else 0
+    remaining=max(0,volume-current_done)
+    days=max(7,remaining/rate)+max(0,target-level-1)*max(7,volume/rate)
+    return (now+timedelta(days=days)).date()
+
+
+def learning_settings(source_id,token):
+    from zoneinfo import ZoneInfo
+    response=notion("POST",f"/data_sources/{source_id}/query",token,{
+        "filter":{"property":"Name","title":{"equals":"Configuration"}},"page_size":2})
+    rows=response.get("results",[])
+    if len(rows)!=1:
+        raise ValueError("Expected exactly one Learning Settings Configuration row")
+    properties=rows[0]["properties"]
+    target=properties["Daily Lessons Target"]["number"]
+    if target is None or int(target)!=target or not 1<=target<=100:
+        raise ValueError("Daily Lessons Target must be a whole number 1..100")
+    timezone="".join(t.get("plain_text","") for t in properties["Timezone"].get("rich_text",[])).strip() or "Asia/Ho_Chi_Minh"
+    ZoneInfo(timezone)
+    return int(target),timezone
+
+
 def notion(method, path, token, payload=None):
     return request(method, NOTION_BASE + path, token,
                    {"Notion-Version": NOTION_VERSION}, payload)
@@ -168,9 +236,12 @@ def main():
                                required("NOTION_MILESTONES_DATA_SOURCE_ID"))
     field_metrics = ["Learned Kanji", "Learned Vocab", "Apprentice", "Guru", "Master",
                      "Enlightened", "Burned", "Accuracy Pct", "Reviews Now", "Reviews Next 24h"]
-    validate_source(snaps_id, {"Name", "Synced At", "Level", "Days Per Level", *field_metrics}, notion_token)
+    validate_source(snaps_id, {"Name", "Synced At", "Level", "Days Per Level", "Daily Target","Lessons Today","Lessons 7d Avg","Lessons 30d Avg","Vocab 7d Avg","Vocab 30d Avg","Target Hit 7d Pct","Actual Pace Days/Level", *field_metrics}, notion_token)
     validate_source(milestones_id, {"Milestone", "Target WK Level", "Start", "ETA",
-                                    "Days Left", "Progress Pct", "Basis"}, notion_token)
+                                    "Days Left", "Progress Pct", "Basis","Target ETA","Actual Pace","Lessons/Level"}, notion_token)
+    settings_id = required("NOTION_SETTINGS_DATA_SOURCE_ID")
+    validate_source(settings_id, {"Name","Daily Lessons Target","Timezone"}, notion_token)
+    daily_target,tz = learning_settings(settings_id,notion_token)
     now = datetime.now(timezone.utc)
     level = wk("user", wk_token)["data"]["level"]
     assignments = collection("assignments", wk_token)
@@ -179,10 +250,21 @@ def main():
     summary = wk("summary", wk_token)["data"]
     pace, observations, current_started = median_level_days(progressions, level)
     counts = metrics(assignments, stats, summary, now)
+    activity,started_at=lesson_activity(assignments,now,tz)
+    volume,samples=lessons_per_level(started_at,progressions)
+    actual=activity["Lessons 30d Avg"]
+    actual_pace=round(max(7,volume/actual),2) if volume is not None and actual>=1 else None
     key = now.strftime("WK %Y-%m-%d UTC")
-    snap = props("Name", key, {"Level": level, "Days Per Level": pace, **counts},
+    snap = props("Name", key, {"Level": level, "Days Per Level": pace, **counts,
+                 "Daily Target":daily_target,"Lessons Today":activity["Lessons Today"],
+                 "Lessons 7d Avg":activity["Lessons 7d Avg"],
+                 "Lessons 30d Avg":activity["Lessons 30d Avg"],
+                 "Vocab 7d Avg":activity["Vocab 7d Avg"],
+                 "Vocab 30d Avg":activity["Vocab 30d Avg"],
+                 "Target Hit 7d Pct":round(activity["Lessons 7d Avg"]/daily_target*100,1),
+                 "Actual Pace Days/Level":actual_pace},
                  dates={"Synced At": now})
-    print(f"WaniKani current level={level}; pace={pace}; samples={observations}")
+    print(f"WaniKani level={level}; target={daily_target} lessons/day; actual 7d={activity['Lessons 7d Avg']}, 30d={actual}; estimated lessons/level={volume}, samples={samples}")
     print("Snapshot", upsert(snaps_id, "Name", key, snap, notion_token))
     config = json.loads(Path(__file__).with_name("milestones.json").read_text(encoding="utf-8"))
     for item in config:
@@ -190,15 +272,20 @@ def main():
         if target < 1 or target > 60:
             raise ValueError("Milestone target must be a WaniKani level 1..60")
         title = item["name"]
-        eta = forecast(target, level, pace, current_started, now, progressions)
+        eta = (forecast(target,level,None,None,now,progressions) if level>=target
+               else workload_eta(target,level,volume,actual,current_started,started_at,now))
+        target_eta = (eta if level>=target else workload_eta(target,level,volume,daily_target,current_started,started_at,now))
         days_left = max(0, (eta - now.date()).days) if eta else None
-        basis = (f"WaniKani LEVEL PROXY, not official JLPT readiness. "
-                 f"Median days/level={pace}; interval count={observations}. "
-                 f"An ETA requires >=2 completed level intervals.")
+        basis = (f"WaniKani level proxy, not JLPT readiness. "
+                 f"Historical lesson volume/level={volume} from {samples} intervals; "
+                 f"actual 30d lessons/day={actual}; target={daily_target}; "
+                 f"7d active days={activity['Active Days 7d']}. "
+                 f"Workload estimate only, minimum 7 days per level for SRS; "
+                 f"cannot predict kanji Guru timing precisely.")
         properties = props("Milestone", title,
                            {"Target WK Level": target, "Progress Pct": round(min(100,level/target*100),1),
-                            "Days Left": days_left},
-                           dates={"Start": now.date(), "ETA": eta}, rich={"Basis": basis})
+                            "Days Left": days_left,"Actual Pace":actual,"Lessons/Level":volume},
+                           dates={"Start": now.date(), "ETA": eta, "Target ETA":target_eta}, rich={"Basis": basis})
         print(title, upsert(milestones_id, "Milestone", title, properties, notion_token),
               "ETA:", eta or "insufficient history")
     print("Success: Notion has been synchronized.")

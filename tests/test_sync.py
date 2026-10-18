@@ -54,7 +54,7 @@ class SyncTests(unittest.TestCase):
         stats,starts=lesson_activity(assignments,now,"Asia/Ho_Chi_Minh",date(2026,10,17))
         self.assertEqual(stats["Lessons Today"],1)
         self.assertEqual(stats["Lessons 7d Avg"],1.0)
-        self.assertEqual(stats["Vocab 7d Avg"],0.0)
+        self.assertEqual(stats["Vocab 7d Avg"],0.5)
         self.assertIsNone(workload_eta(10,4,None,15,None,starts,now))
 
     def test_tracking_starts_today(self):
@@ -64,9 +64,36 @@ class SyncTests(unittest.TestCase):
                      {"data":{"subject_type":"vocabulary","started_at":"2026-10-17T15:00:00Z"}}]
         data,_=lesson_activity(assignments,now,"Asia/Ho_Chi_Minh",date(2026,10,18))
         self.assertEqual(data["Lessons Today"],1)
-        self.assertIsNone(data["Lessons 7d Avg"])
-        self.assertIsNone(data["Lessons 30d Avg"])
-        self.assertEqual(data["Completed Days"],0)
+        self.assertEqual(data["Lessons 7d Avg"],1.0)
+        self.assertEqual(data["Lessons 30d Avg"],1.0)
+        self.assertEqual(data["Elapsed Days"],1)
+
+    def test_no_starts_uses_provisional_eta(self):
+        from sync import lesson_activity,choose_eta_rate
+        now=datetime(2026,10,18,15,tzinfo=timezone.utc)
+        data,_=lesson_activity([{"data":{"subject_type":"kanji","started_at":"2026-10-17T12:00:00Z"}}],
+                                now,"Asia/Ho_Chi_Minh",date(2026,10,18))
+        self.assertEqual(data["Lessons Today"],0)
+        self.assertEqual(data["Lessons 7d Avg"],0)
+        self.assertEqual(data["Lessons 30d Avg"],0)
+        self.assertEqual(choose_eta_rate(0,0,15),(15,"target_only_provisional"))
+
+    def test_recent_ignores_before_start_includes_today(self):
+        from sync import lesson_activity,choose_eta_rate
+        now=datetime(2026,10,19,12,tzinfo=timezone.utc)
+        items=[{"data":{"subject_type":"vocabulary","started_at":"2026-10-17T12:00:00Z"}}]*10
+        items += [{"data":{"subject_type":"kanji","started_at":"2026-10-18T12:00:00Z"}}]*4
+        items += [{"data":{"subject_type":"vocabulary","started_at":"2026-10-19T10:00:00Z"}}]*2
+        data,_=lesson_activity(items,now,"Asia/Ho_Chi_Minh",date(2026,10,18))
+        self.assertEqual(data["Elapsed Days"],2)
+        self.assertEqual(data["Lessons Today"],2)
+        self.assertEqual(data["Lessons 7d Avg"],3.0)
+        self.assertEqual(data["Lessons 30d Avg"],3.0)
+        self.assertEqual(choose_eta_rate(3.0,3.0,15),(3.0,"observed_recent_7d"))
+
+    def test_empty_recent_week_falls_back_to_30d(self):
+        from sync import choose_eta_rate
+        self.assertEqual(choose_eta_rate(0,2.4,15),(2.4,"observed_30d_fallback"))
 
     def test_volume_and_target_projection(self):
         from sync import lessons_per_level,workload_eta

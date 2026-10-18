@@ -111,6 +111,12 @@ For the two new databases, the GitHub Notion integration needs Read/Insert/Updat
 The prior model used `141 historical lessons/level`, even though WaniKani has exact per-level subject counts. This has been replaced by `wk_detailed.forecast_with_inventory()` and `forecast_full_lessons()`. `Lessons/Level` in old Notion snapshot rows remains a historical diagnostic only; the ETA calculation never uses it. `ETA Status`, `Target ETA`, `Target Full Lessons ETA`, `Gate Lessons Remaining` and `Remaining Lessons (Full)` should be read together. Gate estimates assume prioritizing Kanji/Radical lessons; daily lesson budget spent on Vocabulary may delay level-up. The Notion tracking plan begins 2026-10-18, and older `started_at` events are excluded from 7d and 30d pace.
 
 
+### Daily dashboard activity: Lessons Today vs Reviews Today
+
+The N5 live page shows **Lessons Today / Daily Lessons Target**, a Radical/Kanji/Vocabulary breakdown, and **Reviews Today (ƯỚC TÍNH)**. Lessons Today is exact from assignment `started_at` timestamps in the configured Vietnamese timezone. The Reviews number is **not an exact session count**: WaniKani deprecated `GET /reviews`, so `daily_reviews.py` compares the current **cumulative meaning-correct answers** with the latest saved review checkpoint *before* local midnight. The source and time window are stored in Snapshot `Reviews Today Window`, and the proxy total in `Reviews Today Approx`.
+
+**Caveats:** If someone reviewed after the prior-day checkpoint but before midnight, their activity can be counted for the new day. Meaning-correct counts are not a complete record of review events; missed intervals, resets and missing midnight baseline prevent an exact calculation. A missing prior-day checkpoint results in a blank value, **not zero**. Completing a lesson quiz is not a review. All cards update on the GitHub Actions cadence, not live with every tap.
+
 ### Comparable ETAs and subject-type lesson rates
 
 | Forecast | Daily pace input | Remaining work |

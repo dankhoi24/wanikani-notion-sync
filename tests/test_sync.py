@@ -314,6 +314,50 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(data[-1]["Day"],date(2026,10,27))
         self.assertTrue(all(x["Recent Pace (7d)"]==1 for x in data))
 
+    def test_combined_notion_chart_is_one_svg_with_two_series_and_target(self):
+        from notion_svg_chart import chart_svg
+        sample=[
+            {"Day":date(2026,10,18),"Lessons Today":19,
+             "Recent Pace (7d)":19,"Daily Target":15},
+            {"Day":date(2026,10,19),"Lessons Today":0,
+             "Recent Pace (7d)":9.5,"Daily Target":15}
+        ]
+        svg=chart_svg(sample,datetime(2026,10,18,17,10,tzinfo=timezone.utc),
+                      "Asia/Ho_Chi_Minh").decode("utf-8")
+        self.assertTrue(svg.startswith("<svg "))
+        self.assertIn("18/10",svg)
+        self.assertIn("19/10",svg)
+        self.assertIn("Lessons Today",svg)
+        self.assertIn("Recent Pace (7d)",svg)
+        self.assertIn("Daily Target: 15 lessons",svg)
+        self.assertEqual(svg.count("</svg>"),1)
+
+    def test_combined_chart_replaces_existing_image_not_duplicate(self):
+        from unittest.mock import patch
+        from notion_svg_chart import update_daily_chart
+        image={"id":"chart-block-id","type":"image","image":{
+            "type":"file","file":{"url":"https://notion-static.com/wanikani-daily-lessons-pace.svg"},
+            "caption":[]}}
+        calls=[]
+        def fake_notion(method,path,token,payload=None):
+            calls.append((method,path,payload))
+            if method=="GET":
+                return {"results":[image],"has_more":False}
+            return {"object":"block"}
+        sample=[{"Day":date(2026,10,18),"Lessons Today":19,
+                 "Recent Pace (7d)":19,"Daily Target":15}]
+        with patch("notion_svg_chart.send_svg",return_value="some-upload-id") as upload:
+            success=update_daily_chart(fake_notion,"fake-token","fake-page-id",
+                                       sample,datetime(2026,10,18,15,tzinfo=timezone.utc),
+                                       "Asia/Ho_Chi_Minh")
+        self.assertTrue(success)
+        upload.assert_called_once()
+        self.assertEqual(len(calls),2)
+        self.assertEqual(calls[1][1],"/blocks/chart-block-id")
+        self.assertEqual(calls[1][2]["image"]["type"],"file_upload")
+        self.assertIn("WK_DAILY_COMBO_CHART",
+                      calls[1][2]["image"]["caption"][0]["text"]["content"])
+
     def test_volume_and_target_projection(self):
         from sync import lessons_per_level,workload_eta
         history=[{"data":{"level":i,"started_at":f"2026-09-{d:02d}T00:00:00Z"}} for i,d in [(1,1),(2,11),(3,21)]]

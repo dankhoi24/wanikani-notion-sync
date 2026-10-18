@@ -138,9 +138,13 @@ def update_daily_chart(notion,token,page_id,rows,now,tz):
     else:
         action="PATCH";path=f"/blocks/{charts[0]['id']}"
     file_id=send_svg(notion,token,svg)
-    image={"type":"file_upload","file_upload":{"id":file_id},
+    # PATCH block:image accepts only the editable media reference/caption.
+    # In particular, Notion rejects an image.type field on PATCH even though
+    # the same field is required when appending a brand-new image block.
+    image={"file_upload":{"id":file_id},
            "caption":[{"type":"text","text":{"content":CAPTION}}]}
     payload=({"image":image} if charts else
-             {"children":[{"object":"block","type":"image","image":image}]})
+             {"children":[{"object":"block","type":"image",
+                           "image":{"type":"file_upload",**image}}]})
     notion(action,path,token,payload)
     return True

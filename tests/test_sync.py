@@ -45,5 +45,27 @@ class SyncTests(unittest.TestCase):
         self.assertIsNone(p["ETA"]["date"])
 
 
+    def test_dynamic_activity(self):
+        from sync import lesson_activity,lessons_per_level,workload_eta
+        now=datetime(2026,10,18,17,tzinfo=timezone.utc)
+        assignments=[{"data":{"subject_type":"vocabulary","started_at":"2026-10-18T16:00:00Z"}},
+                     {"data":{"subject_type":"radical","started_at":"2026-10-17T16:00:00Z"}},
+                     {"data":{"subject_type":"kanji","started_at":None}}]
+        stats,starts=lesson_activity(assignments,now,"Asia/Ho_Chi_Minh")
+        self.assertEqual(stats["Lessons Today"],1)
+        self.assertEqual(stats["Lessons 7d Avg"],round(2/7,2))
+        self.assertEqual(stats["Vocab 7d Avg"],round(1/7,2))
+        self.assertIsNone(workload_eta(10,4,None,15,None,starts,now))
+
+    def test_volume_and_target_projection(self):
+        from sync import lessons_per_level,workload_eta
+        history=[{"data":{"level":i,"started_at":f"2026-09-{d:02d}T00:00:00Z"}} for i,d in [(1,1),(2,11),(3,21)]]
+        starts=[datetime(2026,9,d,tzinfo=timezone.utc) for d in [2,3,4,12,13,14] for _ in range(5)]
+        volume,samples=lessons_per_level(starts,history)
+        self.assertEqual((volume,samples),(15,2))
+        now=datetime(2026,10,18,tzinfo=timezone.utc)
+        self.assertIsNotNone(workload_eta(6,3,volume,15,None,starts,now))
+        self.assertIsNone(workload_eta(6,3,volume,0,None,starts,now))
+
 if __name__ == '__main__':
     unittest.main()

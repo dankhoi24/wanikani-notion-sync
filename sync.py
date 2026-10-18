@@ -116,7 +116,7 @@ def metrics(assignments, review_stats, summary, now):
             "Reviews Now": due_now, "Reviews Next 24h": due_24}
 
 
-def lesson_activity(assignments, now, tz):
+def lesson_activity(assignments, now, tz, tracking_start):
     from zoneinfo import ZoneInfo
     today=now.astimezone(ZoneInfo(tz)).date()
     daily=Counter()
@@ -132,13 +132,19 @@ def lesson_activity(assignments, now, tz):
         daily[day]+=1
         if data.get("subject_type") in ("vocabulary","kana_vocabulary"):
             vocab[day]+=1
+    completed_days=max(0,(today-tracking_start).days)
     def avg(counter,n):
-        return round(sum(counter[today-timedelta(days=i)] for i in range(n))/n,2)
+        days=min(n,completed_days)
+        return (round(sum(counter[today-timedelta(days=i)] for i in range(1,days+1))/days,2)
+                if days else None)
     return {
-      "Lessons Today":daily[today],"Lessons 7d Avg":avg(daily,7),
-      "Lessons 30d Avg":avg(daily,30),"Vocab 7d Avg":avg(vocab,7),
+      "Lessons Today":daily[today] if today>=tracking_start else 0,
+      "Lessons 7d Avg":avg(daily,7),
+      "Lessons 30d Avg":avg(daily,30),
+      "Vocab 7d Avg":avg(vocab,7),
       "Vocab 30d Avg":avg(vocab,30),
-      "Active Days 7d":sum(daily[today-timedelta(days=i)]>0 for i in range(7))
+      "Active Days 7d":sum(daily[today-timedelta(days=i)]>0 for i in range(1,min(7,completed_days)+1)),
+      "Completed Days":completed_days
     },starts
 
 
@@ -181,7 +187,10 @@ def learning_settings(source_id,token):
         raise ValueError("Daily Lessons Target must be a whole number 1..100")
     timezone="".join(t.get("plain_text","") for t in properties["Timezone"].get("rich_text",[])).strip() or "Asia/Ho_Chi_Minh"
     ZoneInfo(timezone)
-    return int(target),timezone
+    start=properties["Tracking Start"].get("date")
+    if not start or not start.get("start"):
+        raise ValueError("Tracking Start must be set in Notion Learning Settings")
+    return int(target),timezone,date.fromisoformat(start["start"][:10])
 
 
 def notion(method, path, token, payload=None):
@@ -238,10 +247,10 @@ def main():
                      "Enlightened", "Burned", "Accuracy Pct", "Reviews Now", "Reviews Next 24h"]
     validate_source(snaps_id, {"Name", "Synced At", "Level", "Days Per Level", "Daily Target","Lessons Today","Lessons 7d Avg","Lessons 30d Avg","Vocab 7d Avg","Vocab 30d Avg","Target Hit 7d Pct","Actual Pace Days/Level", *field_metrics}, notion_token)
     validate_source(milestones_id, {"Milestone", "Target WK Level", "Start", "ETA",
-                                    "Days Left", "Progress Pct", "Basis","Target ETA","Actual Pace","Lessons/Level"}, notion_token)
+                                    "Days Left", "Progress Pct", "Basis","Target ETA","Actual Pace","Lessons/Level","Recent Pace (7d)"}, notion_token)
     settings_id = required("NOTION_SETTINGS_DATA_SOURCE_ID")
-    validate_source(settings_id, {"Name","Daily Lessons Target","Timezone"}, notion_token)
-    daily_target,tz = learning_settings(settings_id,notion_token)
+    validate_source(settings_id, {"Name","Daily Lessons Target","Timezone","Tracking Start"}, notion_token)
+    daily_target,tz,tracking_start = learning_settings(settings_id,notion_token)
     now = datetime.now(timezone.utc)
     level = wk("user", wk_token)["data"]["level"]
     assignments = collection("assignments", wk_token)
@@ -250,10 +259,10 @@ def main():
     summary = wk("summary", wk_token)["data"]
     pace, observations, current_started = median_level_days(progressions, level)
     counts = metrics(assignments, stats, summary, now)
-    activity,started_at=lesson_activity(assignments,now,tz)
+    activity,started_at=lesson_activity(assignments,now,tz,tracking_start)
     volume,samples=lessons_per_level(started_at,progressions)
     actual=activity["Lessons 30d Avg"]
-    actual_pace=round(max(7,volume/actual),2) if volume is not None and actual>=1 else None
+    actual_pace=round(max(7,volume/actual),2) if volume is not None and actual is not None and actual>=1 and activity["Completed Days"]>=3 else None
     key = now.strftime("WK %Y-%m-%d UTC")
     snap = props("Name", key, {"Level": level, "Days Per Level": pace, **counts,
                  "Daily Target":daily_target,"Lessons Today":activity["Lessons Today"],
@@ -261,7 +270,7 @@ def main():
                  "Lessons 30d Avg":activity["Lessons 30d Avg"],
                  "Vocab 7d Avg":activity["Vocab 7d Avg"],
                  "Vocab 30d Avg":activity["Vocab 30d Avg"],
-                 "Target Hit 7d Pct":round(activity["Lessons 7d Avg"]/daily_target*100,1),
+                 "Target Hit 7d Pct":round(activity["Lessons 7d Avg"]/daily_target*100,1) if activity["Lessons 7d Avg"] is not None else None,
                  "Actual Pace Days/Level":actual_pace},
                  dates={"Synced At": now})
     print(f"WaniKani level={level}; target={daily_target} lessons/day; actual 7d={activity['Lessons 7d Avg']}, 30d={actual}; estimated lessons/level={volume}, samples={samples}")
@@ -273,19 +282,20 @@ def main():
             raise ValueError("Milestone target must be a WaniKani level 1..60")
         title = item["name"]
         eta = (forecast(target,level,None,None,now,progressions) if level>=target
-               else workload_eta(target,level,volume,actual,current_started,started_at,now))
+               else workload_eta(target,level,volume,actual,current_started,started_at,now)
+               if activity["Completed Days"]>=3 else None)
         target_eta = (eta if level>=target else workload_eta(target,level,volume,daily_target,current_started,started_at,now))
         days_left = max(0, (eta - now.date()).days) if eta else None
         basis = (f"WaniKani level proxy, not JLPT readiness. "
                  f"Historical lesson volume/level={volume} from {samples} intervals; "
-                 f"actual 30d lessons/day={actual}; target={daily_target}; "
+                 f"actual 30d lessons/day={actual}; recent 7d={activity['Lessons 7d Avg']}; target={daily_target}; tracking start={tracking_start}; completed days={activity['Completed Days']}; "
                  f"7d active days={activity['Active Days 7d']}. "
                  f"Workload estimate only, minimum 7 days per level for SRS; "
                  f"cannot predict kanji Guru timing precisely.")
         properties = props("Milestone", title,
                            {"Target WK Level": target, "Progress Pct": round(min(100,level/target*100),1),
-                            "Days Left": days_left,"Actual Pace":actual,"Lessons/Level":volume},
-                           dates={"Start": now.date(), "ETA": eta, "Target ETA":target_eta}, rich={"Basis": basis})
+                            "Days Left": days_left,"Actual Pace":actual,"Recent Pace (7d)":activity["Lessons 7d Avg"],"Lessons/Level":volume},
+                           dates={"Start": tracking_start, "ETA": eta, "Target ETA":target_eta}, rich={"Basis": basis})
         print(title, upsert(milestones_id, "Milestone", title, properties, notion_token),
               "ETA:", eta or "insufficient history")
     print("Success: Notion has been synchronized.")

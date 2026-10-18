@@ -132,10 +132,12 @@ def lesson_activity(assignments, now, tz, tracking_start):
         daily[day]+=1
         if data.get("subject_type") in ("vocabulary","kana_vocabulary"):
             vocab[day]+=1
-    completed_days=max(0,(today-tracking_start).days)
+    # Count only dates starting on the new plan's Tracking Start.
+    # The current (partial) day is included, so the ETA can react immediately.
+    elapsed_days=max(0,(today-tracking_start).days+1)
     def avg(counter,n):
-        days=min(n,completed_days)
-        return (round(sum(counter[today-timedelta(days=i)] for i in range(1,days+1))/days,2)
+        days=min(n,elapsed_days)
+        return (round(sum(counter[today-timedelta(days=i)] for i in range(days))/days,2)
                 if days else None)
     return {
       "Lessons Today":daily[today] if today>=tracking_start else 0,
@@ -143,8 +145,8 @@ def lesson_activity(assignments, now, tz, tracking_start):
       "Lessons 30d Avg":avg(daily,30),
       "Vocab 7d Avg":avg(vocab,7),
       "Vocab 30d Avg":avg(vocab,30),
-      "Active Days 7d":sum(daily[today-timedelta(days=i)]>0 for i in range(1,min(7,completed_days)+1)),
-      "Completed Days":completed_days
+      "Active Days 7d":sum(daily[today-timedelta(days=i)]>0 for i in range(min(7,elapsed_days))),
+      "Elapsed Days":elapsed_days
     },starts
 
 
@@ -172,6 +174,15 @@ def workload_eta(target,level,volume,rate,current_start,starts,now):
     remaining=max(0,volume-current_done)
     days=max(7,remaining/rate)+max(0,target-level-1)*max(7,volume/rate)
     return (now+timedelta(days=days)).date()
+
+
+def choose_eta_rate(seven_day, thirty_day, target):
+    """Prefer recent actual pace; fall back to target as a labeled plan-only ETA."""
+    if seven_day is not None and seven_day > 0:
+        return seven_day, "observed_recent_7d"
+    if thirty_day is not None and thirty_day > 0:
+        return thirty_day, "observed_30d_fallback"
+    return target, "target_only_provisional"
 
 
 def learning_settings(source_id,token):
@@ -262,7 +273,9 @@ def main():
     activity,started_at=lesson_activity(assignments,now,tz,tracking_start)
     volume,samples=lessons_per_level(started_at,progressions)
     actual=activity["Lessons 30d Avg"]
-    actual_pace=round(max(7,volume/actual),2) if volume is not None and actual is not None and actual>=1 and activity["Completed Days"]>=3 else None
+    rate_for_eta,rate_source=choose_eta_rate(activity["Lessons 7d Avg"],actual,daily_target)
+    actual_pace=(round(max(7,volume/rate_for_eta),2)
+                 if volume is not None and rate_source!="target_only_provisional" else None)
     key = now.strftime("WK %Y-%m-%d UTC")
     snap = props("Name", key, {"Level": level, "Days Per Level": pace, **counts,
                  "Daily Target":daily_target,"Lessons Today":activity["Lessons Today"],
@@ -282,15 +295,16 @@ def main():
             raise ValueError("Milestone target must be a WaniKani level 1..60")
         title = item["name"]
         eta = (forecast(target,level,None,None,now,progressions) if level>=target
-               else workload_eta(target,level,volume,actual,current_started,started_at,now)
-               if activity["Completed Days"]>=3 else None)
+               else workload_eta(target,level,volume,rate_for_eta,current_started,started_at,now))
         target_eta = (eta if level>=target else workload_eta(target,level,volume,daily_target,current_started,started_at,now))
         days_left = max(0, (eta - now.date()).days) if eta else None
         basis = (f"WaniKani level proxy, not JLPT readiness. "
                  f"Historical lesson volume/level={volume} from {samples} intervals; "
-                 f"actual 30d lessons/day={actual}; recent 7d={activity['Lessons 7d Avg']}; target={daily_target}; tracking start={tracking_start}; completed days={activity['Completed Days']}; "
+                 f"actual 30d lessons/day={actual}; recent 7d={activity['Lessons 7d Avg']}; target={daily_target}; "
+                 f"tracking start={tracking_start}; elapsed days={activity['Elapsed Days']}; "
+                 f"ETA rate={rate_for_eta} ({rate_source}); "
                  f"7d active days={activity['Active Days 7d']}. "
-                 f"Workload estimate only, minimum 7 days per level for SRS; "
+                 f"Workload estimate only; ETA may be provisional, minimum 7 days per level for SRS; "
                  f"cannot predict kanji Guru timing precisely.")
         properties = props("Milestone", title,
                            {"Target WK Level": target, "Progress Pct": round(min(100,level/target*100),1),

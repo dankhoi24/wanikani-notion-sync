@@ -105,10 +105,7 @@ class SyncTests(unittest.TestCase):
         self.assertIsNotNone(workload_eta(6,3,volume,15,None,starts,now))
         self.assertIsNone(workload_eta(6,3,volume,0,None,starts,now))
 
-if __name__ == '__main__':
-    unittest.main()
-
-\nfrom wk_detailed import subjects_by_id,assignments_by_id,inventory,milestone_inventory,review_delta,earliest_next_gate
+from wk_detailed import subjects_by_id,assignments_by_id,inventory,milestone_inventory,review_delta,earliest_next_gate
 class DetailedTests(unittest.TestCase):
     def test_gate_inventory(self):
         subs=[{"id":i,"object":"kanji","data":{"level":4,"component_subject_ids":[]}} for i in range(1,11)]
@@ -120,3 +117,6 @@ class DetailedTests(unittest.TestCase):
         base={k:5 for k in ("meaning_correct","meaning_incorrect","reading_correct","reading_incorrect")}
         now={k:3 for k in base}
         self.assertFalse(review_delta(now,base,base)["Counter Valid"])
+
+if __name__ == '__main__':
+    unittest.main()

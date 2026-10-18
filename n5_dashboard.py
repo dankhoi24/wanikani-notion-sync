@@ -8,6 +8,9 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 CARD_LABELS = (
+    "LESSONS HÔM NAY",
+    "REVIEWS HÔM NAY · ƯỚC TÍNH",
+    "LESSONS HÔM NAY THEO LOẠI",
     "LÊN LEVEL · ETA THỰC TẾ",
     "LÊN LEVEL · TARGET ETA",
     "FULL LESSONS · ETA THỰC TẾ",
@@ -46,7 +49,7 @@ def bar(pct, width=12):
 
 
 def card_values(level, target, milestone, gate, activity, counts, review,
-                now, timezone):
+                now, timezone, daily_target=None, daily_reviews=None):
     """Create source-of-truth KPI card values; never infer Guru from lesson starts."""
     passed = milestone.get("Next Gate Passed") or 0
     required = milestone.get("Next Gate Required") or 0
@@ -55,7 +58,21 @@ def card_values(level, target, milestone, gate, activity, counts, review,
     accuracy_new = review.get("Review Accuracy New")
     accuracy_all = counts.get("Accuracy Pct")
     due_now, due_24h = counts.get("Reviews Now") or 0, counts.get("Reviews Next 24h") or 0
+    daily_lessons=activity.get("Lessons Today") or 0
+    configured_target=daily_target or 15
+    pct=min(100,100*daily_lessons/configured_target)
+    review_count=(daily_reviews or {}).get("Reviews Today Approx")
+    if review_count is None:
+        reviews_label="— Chưa đủ checkpoint"
+    else:
+        reviews_label=f"≈ {number_label(review_count)} review"
     result = {
+        "LESSONS HÔM NAY": f"{int(daily_lessons)} / {configured_target} bài · {pct:.0f}%\\n{bar(pct)}",
+        "REVIEWS HÔM NAY · ƯỚC TÍNH": reviews_label,
+        "LESSONS HÔM NAY THEO LOẠI": (
+            f"Radical {activity.get('Radical Lessons Today',0)} · "
+            f"Kanji {activity.get('Kanji Lessons Today',0)} · "
+            f"Vocab {activity.get('Vocab Lessons Today',0)}"),
         "LÊN LEVEL · ETA THỰC TẾ": date_label(milestone.get("ETA")),
         "LÊN LEVEL · TARGET ETA": date_label(milestone.get("Target ETA")),
         "FULL LESSONS · ETA THỰC TẾ": date_label(milestone.get("Actual Full Lessons ETA")),

@@ -7,6 +7,7 @@ import time
 from collections import Counter
 from n5_dashboard import card_values, update_n5_dashboard
 from unlock_forecast import estimate_unlocks_today, unlock_cards
+from daily_lessons import history_rows, push_daily_rows
 from daily_reviews import (most_recent_before_midnight, day_start_utc,
                            estimate_reviews_today)
 from wk_detailed import (subjects_by_id,assignments_by_id,inventory,milestone_inventory,
@@ -359,6 +360,16 @@ def main():
     pace, observations, current_started = median_level_days(progressions, level)
     counts = metrics(assignments, stats, summary, now)
     activity,started_at=lesson_activity(assignments,now,tz,tracking_start)
+    daily_source_id=os.environ.get("NOTION_DAILY_LESSONS_DATA_SOURCE_ID","").strip()
+    if daily_source_id:
+        validate_source(daily_source_id,{
+            "Name","Day","Lessons Today","Recent Pace (7d)",
+            "Radical Today","Kanji Today","Vocab Today","Daily Target"
+        },notion_token)
+        history=history_rows(assignments,now,tz,tracking_start,daily_target)
+        published=push_daily_rows(history,daily_source_id,notion_token,upsert,props)
+        print("Daily lesson chart local days:", [row["Day"].isoformat()
+              for row in history], published)
     volume,samples=lessons_per_level(started_at,progressions)
     actual=activity["Lessons 30d Avg"]
     # Level-up lessons require Radical/Kanji (NOT Vocabulary). Starting

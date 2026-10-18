@@ -55,6 +55,11 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(stats["Lessons Today"],1)
         self.assertEqual(stats["Lessons 7d Avg"],1.0)
         self.assertEqual(stats["Vocab 7d Avg"],0.5)
+        self.assertEqual(stats["Radical 7d Avg"],0.5)
+        self.assertEqual(stats["Kanji 7d Avg"],0)
+        self.assertEqual(stats["Gate 7d Avg"],0.5)
+        self.assertEqual(stats["Radical Lessons Today"],0)
+        self.assertEqual(stats["Vocab Lessons Today"],1)
         self.assertIsNone(workload_eta(10,4,None,15,None,starts,now))
 
     def test_tracking_starts_today(self):
@@ -66,6 +71,10 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(data["Lessons Today"],1)
         self.assertEqual(data["Lessons 7d Avg"],1.0)
         self.assertEqual(data["Lessons 30d Avg"],1.0)
+        self.assertEqual(data["Radical 7d Avg"],0)
+        self.assertEqual(data["Kanji 7d Avg"],0)
+        self.assertEqual(data["Vocab 7d Avg"],1.0)
+        self.assertEqual(data["Gate 7d Avg"],0)
         self.assertEqual(data["Elapsed Days"],1)
 
     def test_no_starts_uses_provisional_eta(self):
@@ -89,11 +98,72 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(data["Lessons Today"],2)
         self.assertEqual(data["Lessons 7d Avg"],3.0)
         self.assertEqual(data["Lessons 30d Avg"],3.0)
+        self.assertEqual(data["Gate 7d Avg"],2.0)
+        self.assertEqual(data["Kanji 7d Avg"],2.0)
+        self.assertEqual(data["Vocab 7d Avg"],1.0)
+        self.assertEqual(data["Radical 7d Avg"],0)
         self.assertEqual(choose_eta_rate(3.0,3.0,15),(3.0,"observed_recent_7d"))
 
     def test_empty_recent_week_falls_back_to_30d(self):
         from sync import choose_eta_rate
         self.assertEqual(choose_eta_rate(0,2.4,15),(2.4,"observed_30d_fallback"))
+
+    def test_five_lessons_split_across_types_and_etas(self):
+        from sync import lesson_activity, choose_eta_rate
+        from wk_detailed import forecast_with_inventory,forecast_full_lessons
+        from datetime import timedelta
+        now=datetime(2026,10,18,12,tzinfo=timezone.utc)
+        assignments=([
+            {"data":{"subject_type":kind,"started_at":"2026-10-18T10:00:00Z"}}
+            for kind in (["kanji"]*3 + ["vocabulary","kana_vocabulary"])
+        ] + [
+            {"data":{"subject_type":"radical","started_at":"2026-10-17T10:00:00Z"}}
+        ])
+        activity,_=lesson_activity(assignments,now,"Asia/Ho_Chi_Minh",date(2026,10,18))
+        self.assertEqual(activity["Lessons Today"],5)
+        self.assertEqual(activity["Radical 7d Avg"],0)
+        self.assertEqual(activity["Kanji 7d Avg"],3)
+        self.assertEqual(activity["Vocab 7d Avg"],2)
+        self.assertEqual(activity["Gate 7d Avg"],3)
+        self.assertEqual(activity["Gate 30d Avg"],3)
+        gate_rate,_=choose_eta_rate(activity["Gate 7d Avg"],activity["Gate 30d Avg"],15)
+        full_rate,_=choose_eta_rate(activity["Lessons 7d Avg"],activity["Lessons 30d Avg"],15)
+        self.assertEqual((gate_rate,full_rate),(3,5))
+        rows=[{"Level":4,"Kanji Total":36,"Lessons Total":100,
+               "Gate Lessons Remaining":6,"Lessons Remaining":100,"Kanji To Guru":23}]
+        srs_floor=now+timedelta(days=4)
+        gate_actual=forecast_with_inventory(rows,4,5,gate_rate,now,srs_floor)
+        gate_target=forecast_with_inventory(rows,4,5,15,now,srs_floor)
+        full_actual=forecast_full_lessons(rows,4,5,full_rate,now,gate_actual)
+        full_target=forecast_full_lessons(rows,4,5,15,now,gate_target)
+        self.assertEqual(gate_actual,(now+timedelta(days=4)).date())
+        self.assertEqual(full_actual,(now+timedelta(days=20)).date())
+        self.assertEqual(full_target,(now+timedelta(days=7)).date())
+        self.assertLess(gate_actual,full_actual)
+        self.assertGreater(full_actual,full_target)
+
+    def test_only_vocabulary_does_not_create_a_level_up_eta(self):
+        from sync import lesson_activity,choose_eta_rate
+        from wk_detailed import forecast_with_inventory
+        now=datetime(2026,10,18,12,tzinfo=timezone.utc)
+        assignments=[{"data":{"subject_type":"vocabulary",
+                              "started_at":"2026-10-18T10:00:00Z"}}]*5
+        activity,_=lesson_activity(assignments,now,"Asia/Ho_Chi_Minh",date(2026,10,18))
+        self.assertEqual(activity["Gate 7d Avg"],0)
+        self.assertEqual(activity["Lessons 7d Avg"],5)
+        rate,_=choose_eta_rate(activity["Gate 7d Avg"],activity["Gate 30d Avg"],15)
+        self.assertIsNone(rate)
+        self.assertIsNone(forecast_with_inventory(
+            [{"Level":4,"Kanji Total":36,"Lessons Total":100,"Gate Lessons Remaining":6}],
+            4,5,rate,now))
+
+    def test_zero_lessons_produces_zero_for_all_categories(self):
+        from sync import lesson_activity
+        now=datetime(2026,10,18,12,tzinfo=timezone.utc)
+        activity,_=lesson_activity([],now,"Asia/Ho_Chi_Minh",date(2026,10,18))
+        for key in ("Lessons 7d Avg","Radical 7d Avg","Kanji 7d Avg",
+                    "Vocab 7d Avg","Gate 7d Avg"):
+            self.assertEqual(activity[key],0)
 
     def test_volume_and_target_projection(self):
         from sync import lessons_per_level,workload_eta

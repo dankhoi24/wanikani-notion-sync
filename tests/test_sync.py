@@ -107,3 +107,16 @@ class SyncTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+\nfrom wk_detailed import subjects_by_id,assignments_by_id,inventory,milestone_inventory,review_delta,earliest_next_gate
+class DetailedTests(unittest.TestCase):
+    def test_gate_inventory(self):
+        subs=[{"id":i,"object":"kanji","data":{"level":4,"component_subject_ids":[]}} for i in range(1,11)]
+        ass=[{"data":{"subject_id":i,"srs_stage":5,"started_at":"2026-10-01T00:00:00Z"}} for i in range(1,9)]
+        row=inventory(subjects_by_id(subs),assignments_by_id(ass),4,4)[0]
+        self.assertEqual(row["Kanji Guru Required"],9)
+        self.assertEqual(row["Kanji To Guru"],1)
+    def test_counter_reset(self):
+        base={k:5 for k in ("meaning_correct","meaning_incorrect","reading_correct","reading_incorrect")}
+        now={k:3 for k in base}
+        self.assertFalse(review_delta(now,base,base)["Counter Valid"])

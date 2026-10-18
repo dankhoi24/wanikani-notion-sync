@@ -500,8 +500,10 @@ def main():
     if n5_dashboard_id and daily_source_id:
         # Render one native SVG image holding BOTH daily lessons and 7-day pace.
         # Does not consume Notion Free's single interactive Chart-view allowance.
+        # Chart's left edge stays at the plan's tracking-start calendar date
+        # (18 Oct 2026), even after the first 30 days.
         chart_days=history_rows(assignments,now,tz,tracking_start,daily_target,
-                                lookback_days=30)
+                                lookback_days=max(30,activity["Elapsed Days"]))
         if update_daily_chart(notion,notion_token,n5_dashboard_id,
                               chart_days,now,tz):
             print("N5 combined daily chart image updated:",

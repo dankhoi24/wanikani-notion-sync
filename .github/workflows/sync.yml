@@ -6,6 +6,7 @@ on:
     paths:
       - 'sync.py'
       - 'n5_dashboard.py'
+      - 'daily_reviews.py'
       - 'unlock_forecast.py'
       - 'wk_detailed.py'
       - 'tests/**'

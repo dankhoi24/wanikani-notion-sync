@@ -531,7 +531,7 @@ def main():
             "Sim Full P50":sim_full.get("P50"),
             "Sim Full P90":sim_full.get("P90")}
         rate=simulation.get("accuracy_rates",{})
-        counts=simulation.get("accuracy_samples",{})
+        sample_counts=simulation.get("accuracy_samples",{})
         kanji_rate=rate.get("kanji") or (None,None)
         radical_rate=rate.get("radical") or (None,None)
         sim_numbers={
@@ -543,9 +543,9 @@ def main():
             "Sim Accuracy Radical Meaning":(
                 round(100*radical_rate[0],2) if radical_rate[0] is not None else None),
             "Sim Accuracy Kanji Samples":(
-                (counts.get("kanji") or {}).get("meaning")),
+                (sample_counts.get("kanji") or {}).get("meaning")),
             "Sim Accuracy Radical Samples":(
-                (counts.get("radical") or {}).get("meaning"))}
+                (sample_counts.get("radical") or {}).get("meaning"))}
         sim_status=("Conditional stochastic simulation from observed subject "
                     "accuracy; NOT a factual or guaranteed completion date."
                     if simulation["valid"] else

@@ -445,6 +445,60 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(cards["KANJI MEANING ACCURACY"],"89.3%")
         self.assertEqual(cards["KANJI READING ACCURACY"],"81.4%")
 
+    def test_future_wk_milestone_uses_real_srs_dependency_chain(self):
+        from milestone_bounds import conditional_earliest
+        from datetime import timedelta
+        now=datetime(2026,10,21,6,tzinfo=timezone.utc)
+        subjects={
+          1:{"type":"kanji","level":4,"component_subject_ids":[],"spaced_repetition_system_id":10},
+          2:{"type":"radical","level":5,"component_subject_ids":[],"spaced_repetition_system_id":10},
+          3:{"type":"kanji","level":5,"component_subject_ids":[2],"spaced_repetition_system_id":10},
+          4:{"type":"vocabulary","level":5,"component_subject_ids":[3],"spaced_repetition_system_id":10},
+        }
+        assigned={1:{"srs_stage":4,"started_at":"2026-10-18T10:00:00Z",
+                     "available_at":"2026-10-21T12:00:00Z"}}
+        srs={10:{1:4*3600,2:8*3600,3:23*3600,4:47*3600}}
+        gate=conditional_earliest(subjects,assigned,4,6,now,
+                                  "Asia/Ho_Chi_Minh",15,srs,include_vocab=False)
+        full=conditional_earliest(subjects,assigned,4,6,now,
+                                  "Asia/Ho_Chi_Minh",15,srs,include_vocab=True)
+        self.assertIsNotNone(gate["at"],gate["status"])
+        self.assertIsNotNone(full["at"],full["status"])
+        # Current level needs one real scheduled review. Level 5 radical
+        # then its dependent Kanji each need their OWN four SRS reviews.
+        chain=timedelta(hours=(4+8+23+47)*2)
+        self.assertGreaterEqual(gate["at"],now+chain)
+        self.assertGreaterEqual(full["at"],gate["at"])
+        self.assertEqual(gate["lessons"],2)
+        self.assertEqual(full["lessons"],3)
+        self.assertIn("Conditional",gate["status"])
+
+    def test_future_milestone_not_estimable_without_api_srs(self):
+        from milestone_bounds import conditional_earliest
+        now=datetime(2026,10,21,6,tzinfo=timezone.utc)
+        subjects={1:{"type":"kanji","level":4,"component_subject_ids":[],
+                     "spaced_repetition_system_id":11}}
+        r=conditional_earliest(subjects,{},4,5,now,
+                               "Asia/Ho_Chi_Minh",15,{})
+        self.assertIsNone(r["at"])
+        self.assertIn("SRS",r["status"])
+
+    def test_future_milestone_today_lesson_cap_is_respected(self):
+        from milestone_bounds import conditional_earliest
+        now=datetime(2026,10,21,6,tzinfo=timezone.utc)
+        subjects={i:{"type":"kanji","level":4,"component_subject_ids":[],
+                    "spaced_repetition_system_id":11} for i in range(1,4)}
+        ass={i:{"srs_stage":0,"unlocked_at":"2026-10-20T00:00:00Z"}
+             for i in subjects}
+        srs={11:{1:14400,2:28800,3:82800,4:169200}}
+        a=conditional_earliest(subjects,ass,4,5,now,
+                               "Asia/Ho_Chi_Minh",15,srs,lessons_today=15)
+        b=conditional_earliest(subjects,ass,4,5,now,
+                               "Asia/Ho_Chi_Minh",15,srs,lessons_today=0)
+        self.assertIsNotNone(a["at"],a["status"])
+        self.assertIsNotNone(b["at"],b["status"])
+        self.assertGreater(a["at"],b["at"])
+
     def test_volume_and_target_projection(self):
         from sync import lessons_per_level,workload_eta
         history=[{"data":{"level":i,"started_at":f"2026-09-{d:02d}T00:00:00Z"}} for i,d in [(1,1),(2,11),(3,21)]]

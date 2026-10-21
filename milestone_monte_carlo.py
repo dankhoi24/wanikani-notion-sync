@@ -168,7 +168,10 @@ def _simulate_once(subjects,assigned,current_level,targets,now,tz,limit,
         if (sid not in started and sid not in queued and
             scoped[sid]["level"]<=level and pending[sid]==0):
             s=scoped[sid]
-            heappush(queue,(priority[s["type"]],s["level"],sid))
+            # Prefer clearing older-level lessons before taking on a newer
+            # level; inside the same level, Radical/Kanji are gate-critical.
+            # This is an EXPLICIT study-order scenario, not observed behavior.
+            heappush(queue,(s["level"],priority[s["type"]],sid))
             queued.add(sid)
 
     def activate_level(l):
@@ -293,6 +296,8 @@ def simulate_milestones(subjects,assigned,review_stats,current_level,targets,
                 "Wrong-answer counts sampled from per-item empirical question "
                 "accuracy (>=10 samples), otherwise observed same-type history; "
                 "WaniKani documented SRS error penalties and hourly boundaries. "
+                "Older WaniKani levels are studied before newer levels, with "
+                "Radical/Kanji prioritized within each level. "
                 "Outcomes P10/P50/P90 describe model variation, NOT empirically "
                 "calibrated probabilities for future attendance/difficulty.")}
     if not targets or any(x<=current_level for x in targets):

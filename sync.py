@@ -9,6 +9,7 @@ from n5_dashboard import card_values, update_n5_dashboard
 from unlock_forecast import estimate_unlocks_today, unlock_cards
 from guru_forecast import guru_scenarios
 from milestone_bounds import conditional_earliest
+from milestone_monte_carlo import simulate_milestones
 from daily_lessons import history_rows, push_daily_rows
 from notion_svg_chart import update_daily_chart
 from daily_reviews import (most_recent_before_midnight, day_start_utc,
@@ -309,8 +310,16 @@ def main():
     validate_source(required("NOTION_LEVEL_BREAKDOWN_DATA_SOURCE_ID"),
                     {"Name","Level","Lessons Remaining","Kanji To Guru",
                      "Min Reviews to Gate",*guru_fields},notion_token)
-    validate_source(milestones_id,guru_fields | {
-        "SRS Scenario Level Date","SRS Scenario Full Date","Evidence & Limits"},notion_token)
+    sim_date_fields={"Sim Level P10","Sim Level P50","Sim Level P90",
+                     "Sim Full P10","Sim Full P50","Sim Full P90"}
+    sim_numeric_fields={"Sim Trials","Sim Accuracy Kanji Meaning",
+                        "Sim Accuracy Kanji Reading",
+                        "Sim Accuracy Radical Meaning",
+                        "Sim Accuracy Kanji Samples",
+                        "Sim Accuracy Radical Samples"}
+    validate_source(milestones_id,guru_fields | sim_date_fields | sim_numeric_fields | {
+        "SRS Scenario Level Date","SRS Scenario Full Date","Evidence & Limits",
+        "Sim Conditions","Sim Status"},notion_token)
     validate_source(required("NOTION_REVIEW_CHECKPOINTS_DATA_SOURCE_ID"),
                     {"Name","Captured At","Meaning Correct Total","Reviews Since Baseline"},notion_token)
     subject_rows = collection("subjects", wk_token)
@@ -467,6 +476,23 @@ def main():
     # lessons have ALREADY been started. P50 includes plausible wrong answers.
     # Future-level SRS floors are still optimistic heuristics, not simulations.
     gate_review_eta=guru_projection.get("Gate P50") or earliest_gate
+    sim_targets=tuple(sorted({int(x["target_wk_level"]) for x in target_config
+                              if int(x["target_wk_level"])>level}))
+    simulation=(simulate_milestones(
+        subjects,assigned,review_stats_all,level,sim_targets,now,tz,
+        daily_target,srs_intervals,lessons_today=activity["Lessons Today"],
+        trials=160,seed=20261021)
+        if sim_targets and (granted_level is None or
+                            granted_level>=max(sim_targets))
+        else {"valid":False,"reason":(
+            "No future milestone, or subscription level cap blocks simulation."),
+              "targets":{},"trials":0,"conditions":"Subscription/target blocked.",
+              "accuracy_rates":{},"accuracy_samples":{}})
+    print("MULTI-LEVEL STOCHASTIC SIMULATION:",
+          "valid=",simulation["valid"],"reason=",simulation.get("reason"),
+          "runs=",simulation.get("trials"),
+          "sample gate P50=",[(t,simulation.get("targets",{}).get(t,{}).get(
+             "gate",{}).get("P50")) for t in sim_targets])
     print("Conditional unlock forecast local date:", unlock_estimate["date"],
           "already available:", unlock_estimate["available_now"],
           "additional possible:", unlock_estimate["potential_today"],
@@ -494,6 +520,36 @@ def main():
                 lessons_today=activity["Lessons Today"],include_vocab=True)
         conditional_level=scenario_gate.get("at")
         conditional_full=scenario_full.get("at")
+        result_pair=simulation.get("targets",{}).get(target,{})
+        sim_gate=result_pair.get("gate",{})
+        sim_full=result_pair.get("full",{})
+        sim_dates={
+            "Sim Level P10":sim_gate.get("P10"),
+            "Sim Level P50":sim_gate.get("P50"),
+            "Sim Level P90":sim_gate.get("P90"),
+            "Sim Full P10":sim_full.get("P10"),
+            "Sim Full P50":sim_full.get("P50"),
+            "Sim Full P90":sim_full.get("P90")}
+        rate=simulation.get("accuracy_rates",{})
+        counts=simulation.get("accuracy_samples",{})
+        kanji_rate=rate.get("kanji") or (None,None)
+        radical_rate=rate.get("radical") or (None,None)
+        sim_numbers={
+            "Sim Trials":simulation["trials"] if simulation["valid"] else None,
+            "Sim Accuracy Kanji Meaning":(
+                round(100*kanji_rate[0],2) if kanji_rate[0] is not None else None),
+            "Sim Accuracy Kanji Reading":(
+                round(100*kanji_rate[1],2) if kanji_rate[1] is not None else None),
+            "Sim Accuracy Radical Meaning":(
+                round(100*radical_rate[0],2) if radical_rate[0] is not None else None),
+            "Sim Accuracy Kanji Samples":(
+                (counts.get("kanji") or {}).get("meaning")),
+            "Sim Accuracy Radical Samples":(
+                (counts.get("radical") or {}).get("meaning"))}
+        sim_status=("Conditional stochastic simulation from observed subject "
+                    "accuracy; NOT a factual or guaranteed completion date."
+                    if simulation["valid"] else
+                    "Not estimable: "+str(simulation.get("reason")))
         # Do NOT represent conditional all-correct schedules as actual ETA.
         achieved=level>=target
         eta=forecast(target,level,None,None,now,progressions) if achieved else None
@@ -512,7 +568,11 @@ def main():
                 "reviews must be correct and on time; future unlocks/attendance "
                 "and correctness are unobserved. Thus no actual or target "
                 "milestone ETA is published for WK levels not yet reached. "
-                "No 7-day-per-level heuristic. No claim of JLPT readiness.")
+                "No 7-day-per-level heuristic. No claim of JLPT readiness. "
+                "Sim Level/Full P10,P50,P90 are 160 stochastic review-outcome "
+                "scenarios across all future WK levels with per-type historical "
+                "accuracy; ALL reviews on-time and available lessons started "
+                "immediately are UNOBSERVED user-behavior conditions, not facts.")
         evidence=(f"Observed current WK={level}, Kanji Guru="
                   f"{guru_projection['Guru Passed']}/{guru_projection['Guru Required']}; "
                   f"Kanji meaning accuracy={guru_projection['Kanji Meaning Accuracy']}%, "
@@ -520,6 +580,10 @@ def main():
                   f"current-level Guru P50={guru_projection['Gate P50']}; "
                   f"scenario level={conditional_level} ({scenario_gate['status']}); "
                   f"scenario full={conditional_full} ({scenario_full['status']}); "
+                  f"Monte Carlo P10/P50/P90={sim_dates}; "
+                  f"Accuracy samples={simulation.get('accuracy_samples')}; "
+                  f"model validity={simulation['valid']}; "
+                  f"model reason={simulation.get('reason')}. "
                   "Future milestone actual ETA UNKNOWN. Only currently scheduled "
                   "reviews are facts; later due times and outcomes are conditional.")
         days_left = max(0, (eta - now.date()).days) if eta else None
@@ -557,17 +621,21 @@ def main():
                             "Gate Pace (30d)":activity["Gate 30d Avg"],
                             "Radical Pace (7d)":activity["Radical 7d Avg"],
                             "Kanji Pace (7d)":activity["Kanji 7d Avg"],
-                            "Vocab Pace (7d)":activity["Vocab 7d Avg"],**extra},
+                            "Vocab Pace (7d)":activity["Vocab 7d Avg"],
+                            **sim_numbers,**extra},
                            dates={"Start": tracking_start, "ETA": eta, "Target ETA":target_eta,
                                   "Actual Full Lessons ETA":actual_full_eta,
                                   "Target Full Lessons ETA":full_target_eta,
                                   "Next Gate Earliest":earliest_gate,**row_guru_dates,
                                   "SRS Scenario Level Date":conditional_level,
-                                  "SRS Scenario Full Date":conditional_full},
+                                  "SRS Scenario Full Date":conditional_full,
+                                  **sim_dates},
                            rich={"Basis": basis,"ETA Status":eta_status,
                                  "Full ETA Status":full_eta_status,
                                  "Forecast Method":method,
-                                 "Evidence & Limits":evidence,**row_guru_rich})
+                                 "Evidence & Limits":evidence,
+                                 "Sim Conditions":simulation.get("conditions",""),
+                                 "Sim Status":sim_status,**row_guru_rich})
         print(title, upsert(milestones_id, "Milestone", title, properties, notion_token),
               "ETA:", eta or "insufficient history")
         n5_dashboard_id=os.environ.get("NOTION_N5_DASHBOARD_PAGE_ID", "").strip()
@@ -578,7 +646,8 @@ def main():
                  "Actual Full Lessons ETA":actual_full_eta,
                  "Target Full Lessons ETA":full_target_eta,
                  "SRS Scenario Level Date":conditional_level,
-                 "SRS Scenario Full Date":conditional_full},
+                 "SRS Scenario Full Date":conditional_full,
+                 **sim_dates},
                 gate, activity, counts, review, now, tz,
                 daily_target=daily_target, daily_reviews=daily_reviews,
                 guru_forecast=guru_projection)

@@ -79,9 +79,9 @@ def card_values(level, target, milestone, gate, activity, counts, review,
         if p50 is None or p10 is None or p90 is None:
             return "— Chưa đủ dữ liệu SRS"
         return (p50.astimezone(ZoneInfo(timezone)).strftime("%d/%m/%Y")+
-                "\\nP10–P90: "+
-                p10.astimezone(ZoneInfo(timezone)).strftime("%d/%m")+
-                " – "+p90.astimezone(ZoneInfo(timezone)).strftime("%d/%m"))
+                "\nP10–P90: "+
+                p10.astimezone(ZoneInfo(timezone)).strftime("%d/%m/%Y")+
+                " – "+p90.astimezone(ZoneInfo(timezone)).strftime("%d/%m/%Y"))
     def kanji_percent(key):
         v=guru.get(key)
         return f"{v:.1f}%" if v is not None else "— Chưa có dữ liệu"

@@ -46,8 +46,10 @@ def empirical_accuracy(subjects,stats):
             continue
         vals={}
         for q in ("meaning","reading"):
-            vals[q]=(int(d.get(q+"_correct") or 0),
-                     int(d.get(q+"_incorrect") or 0))
+            # Radical reviews have no reading question in WaniKani.
+            vals[q]=((0,0) if typ=="radical" and q=="reading" else
+                     (int(d.get(q+"_correct") or 0),
+                      int(d.get(q+"_incorrect") or 0)))
             sums[typ][q+"c"]+=vals[q][0]
             sums[typ][q+"i"]+=vals[q][1]
         individual[sid]=vals

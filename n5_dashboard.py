@@ -8,6 +8,10 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 CARD_LABELS = (
+    "MONTE CARLO · WK10 LEVEL",
+    "MONTE CARLO · WK10 FULL",
+    "MONTE CARLO · ACCURACY SOURCE",
+    "MONTE CARLO · STATUS",
     "SRS SCENARIO · WK10 LEVEL",
     "SRS SCENARIO · WK10 FULL",
     "GURU 90% ETA · ACCURACY",
@@ -56,7 +60,8 @@ def bar(pct, width=12):
 
 
 def card_values(level, target, milestone, gate, activity, counts, review,
-                now, timezone, daily_target=None, daily_reviews=None, guru_forecast=None):
+                now, timezone, daily_target=None, daily_reviews=None, guru_forecast=None,
+                simulation=None,sim_target=None):
     """Create source-of-truth KPI card values; never infer Guru from lesson starts."""
     passed = milestone.get("Next Gate Passed") or 0
     required = milestone.get("Next Gate Required") or 0
@@ -91,7 +96,30 @@ def card_values(level, target, milestone, gate, activity, counts, review,
         if isinstance(value,datetime) and value.tzinfo is not None:
             return value.astimezone(ZoneInfo(timezone)).strftime("%d/%m/%Y")
         return date_label(value)
+    sim=simulation or {}
+    projected=(sim.get("targets") or {}).get(sim_target,{})
+    def mc_card(part):
+        dates=projected.get(part,{})
+        if not sim.get("valid") or not dates:
+            return "— Chưa có kết quả hợp lệ"
+        def fmt(key):
+            return dates[key].astimezone(ZoneInfo(timezone)).strftime("%d/%m/%Y")
+        return (f"P50: {fmt('P50')}\\n"
+                f"P10–P90: {fmt('P10')} – {fmt('P90')}")
+    rate=sim.get("accuracy_rates") or {}
+    k=rate.get("kanji")
+    rad=rate.get("radical")
+    source=(f"Kanji Meaning: {100*k[0]:.1f}% · Reading: {100*k[1]:.1f}%"
+            f"\\nRadical Meaning: {100*rad[0]:.1f}%"
+            if k and rad else "— Không đủ Radical/Kanji accuracy")
+    sim_status=(f"{sim.get('trials',0)} lượt mô phỏng · điều kiện, không bảo đảm"
+                if sim.get("valid") else "Không thể mô phỏng: "+
+                  str(sim.get("reason","thiếu dữ liệu"))[:140])
     result = {
+        "MONTE CARLO · WK10 LEVEL":mc_card("gate"),
+        "MONTE CARLO · WK10 FULL":mc_card("full"),
+        "MONTE CARLO · ACCURACY SOURCE":source,
+        "MONTE CARLO · STATUS":sim_status,
         "SRS SCENARIO · WK10 LEVEL":(
             scenario_local_date(milestone.get("SRS Scenario Level Date"))+
             " · nếu review luôn đúng & đúng hạn"),

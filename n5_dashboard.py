@@ -87,12 +87,16 @@ def card_values(level, target, milestone, gate, activity, counts, review,
     def kanji_percent(key):
         v=guru.get(key)
         return f"{v:.1f}%" if v is not None else "— Chưa có dữ liệu"
+    def scenario_local_date(value):
+        if isinstance(value,datetime) and value.tzinfo is not None:
+            return value.astimezone(ZoneInfo(timezone)).strftime("%d/%m/%Y")
+        return date_label(value)
     result = {
         "SRS SCENARIO · WK10 LEVEL":(
-            date_label(milestone.get("SRS Scenario Level Date"))+
+            scenario_local_date(milestone.get("SRS Scenario Level Date"))+
             " · nếu review luôn đúng & đúng hạn"),
         "SRS SCENARIO · WK10 FULL":(
-            date_label(milestone.get("SRS Scenario Full Date"))+
+            scenario_local_date(milestone.get("SRS Scenario Full Date"))+
             " · nếu review luôn đúng & đúng hạn"),
         "GURU 90% ETA · ACCURACY":guru_card("Gate"),
         "GURU 100% ETA · ACCURACY":guru_card("All"),

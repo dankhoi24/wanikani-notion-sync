@@ -104,13 +104,13 @@ def card_values(level, target, milestone, gate, activity, counts, review,
             return "— Chưa có kết quả hợp lệ"
         def fmt(key):
             return dates[key].astimezone(ZoneInfo(timezone)).strftime("%d/%m/%Y")
-        return (f"P50: {fmt('P50')}\\n"
+        return (f"P50: {fmt('P50')}\n"
                 f"P10–P90: {fmt('P10')} – {fmt('P90')}")
     rate=sim.get("accuracy_rates") or {}
     k=rate.get("kanji")
     rad=rate.get("radical")
     source=(f"Kanji Meaning: {100*k[0]:.1f}% · Reading: {100*k[1]:.1f}%"
-            f"\\nRadical Meaning: {100*rad[0]:.1f}%"
+            f"\nRadical Meaning: {100*rad[0]:.1f}%"
             if k and rad else "— Không đủ Radical/Kanji accuracy")
     sim_status=(f"{sim.get('trials',0)} lượt mô phỏng · điều kiện, không bảo đảm"
                 if sim.get("valid") else "Không thể mô phỏng: "+

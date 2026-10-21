@@ -359,6 +359,92 @@ class SyncTests(unittest.TestCase):
         self.assertIn("WK_DAILY_COMBO_CHART",
                       calls[1][2]["image"]["caption"][0]["text"]["content"])
 
+    def test_guru_accuracy_kanji_only_and_zero_errors(self):
+        from guru_forecast import accuracy_profile,item_success_probability
+        subs={
+            1:{"type":"kanji","level":4},
+            2:{"type":"kanji","level":4},
+            3:{"type":"vocabulary","level":4},
+            4:{"type":"kanji","level":3}}
+        stats=[
+            {"data":{"subject_id":1,"subject_type":"kanji",
+                "meaning_correct":8,"meaning_incorrect":2,
+                "reading_correct":6,"reading_incorrect":4}},
+            {"data":{"subject_id":2,"subject_type":"kanji",
+                "meaning_correct":10,"meaning_incorrect":0,
+                "reading_correct":10,"reading_incorrect":0}},
+            {"data":{"subject_id":3,"subject_type":"vocabulary",
+                "meaning_correct":0,"meaning_incorrect":1000,
+                "reading_correct":0,"reading_incorrect":1000}},
+            {"data":{"subject_id":4,"subject_type":"kanji",
+                "meaning_correct":10,"meaning_incorrect":0,
+                "reading_correct":10,"reading_incorrect":0}}
+        ]
+        p=accuracy_profile(subs,stats,4)
+        self.assertEqual(p["Kanji Meaning Accuracy"],round(100*28/30,2))
+        self.assertEqual(p["Kanji Reading Accuracy"],round(100*26/30,2))
+        self.assertEqual(p["Kanji Level Accuracy Answers"],40)
+        self.assertLess(item_success_probability(1,p),item_success_probability(2,p))
+
+    def test_guru_90_and_all_with_accuracy_and_stage_delays(self):
+        from guru_forecast import guru_scenarios
+        now=datetime(2026,10,21,6,tzinfo=timezone.utc)
+        subs={i:{"type":"kanji","level":4} for i in range(1,11)}
+        assigned={i:{"srs_stage":5,"passed_at":"2026-10-20T00:00:00Z"}
+                  for i in range(1,9)}
+        assigned.update({
+            9:{"srs_stage":4,"available_at":"2026-10-21T12:00:00Z"},
+            10:{"srs_stage":1,"available_at":"2026-10-21T10:00:00Z"}
+        })
+        stats=[{"data":{"subject_id":i,"subject_type":"kanji",
+               "meaning_correct":90,"meaning_incorrect":10,
+               "reading_correct":80,"reading_incorrect":20}} for i in range(1,11)]
+        g=guru_scenarios(subs,assigned,stats,4,now,trials=180)
+        self.assertTrue(g["Simulation Valid"])
+        self.assertEqual(g["Guru Passed"],8)
+        self.assertEqual(g["Guru Required"],9)
+        self.assertEqual(g["Kanji Review Success Pct"],72.0)
+        self.assertGreaterEqual(g["Gate P10"],now)
+        self.assertLessEqual(g["Gate P10"],g["Gate P50"])
+        self.assertLessEqual(g["Gate P50"],g["Gate P90"])
+        self.assertLessEqual(g["Gate P50"],g["All P50"])
+        self.assertGreaterEqual(g["Gate P50"],datetime(2026,10,21,12,tzinfo=timezone.utc))
+
+    def test_guru_no_accuracy_or_locked_kanji_shows_blank(self):
+        from guru_forecast import guru_scenarios
+        now=datetime(2026,10,21,6,tzinfo=timezone.utc)
+        subjects={1:{"type":"kanji","level":4}}
+        a={1:{"srs_stage":2,"available_at":"2026-10-21T12:00:00Z"}}
+        g=guru_scenarios(subjects,a,[],4,now)
+        self.assertFalse(g["Simulation Valid"])
+        self.assertIsNone(g["Gate P50"])
+        stats=[{"data":{"subject_id":1,"subject_type":"kanji",
+               "meaning_correct":20,"meaning_incorrect":0,
+               "reading_correct":20,"reading_incorrect":0}}]
+        locked=guru_scenarios(subjects,{1:{"srs_stage":0}},stats,4,now)
+        self.assertIsNone(locked["All P50"])
+        self.assertFalse(locked["Simulation Valid"])
+
+    def test_guru_dashboard_cards(self):
+        from n5_dashboard import card_values
+        now=datetime(2026,10,21,6,tzinfo=timezone.utc)
+        from datetime import timedelta
+        forecast={"Gate P10":now+timedelta(days=1),
+                  "Gate P50":now+timedelta(days=2),
+                  "Gate P90":now+timedelta(days=4),
+                  "All P10":now+timedelta(days=2),
+                  "All P50":now+timedelta(days=5),
+                  "All P90":now+timedelta(days=8),
+                  "Kanji Meaning Accuracy":89.3,
+                  "Kanji Reading Accuracy":81.4,
+                  "Kanji Review Success Pct":72.69}
+        cards,_=card_values(4,10,{}, {}, {}, {}, {},now,
+             "Asia/Ho_Chi_Minh",guru_forecast=forecast)
+        self.assertIn("23/10/2026",cards["GURU 90% ETA · ACCURACY"])
+        self.assertIn("P10–P90",cards["GURU 100% ETA · ACCURACY"])
+        self.assertEqual(cards["KANJI MEANING ACCURACY"],"89.3%")
+        self.assertEqual(cards["KANJI READING ACCURACY"],"81.4%")
+
     def test_volume_and_target_projection(self):
         from sync import lessons_per_level,workload_eta
         history=[{"data":{"level":i,"started_at":f"2026-09-{d:02d}T00:00:00Z"}} for i,d in [(1,1),(2,11),(3,21)]]

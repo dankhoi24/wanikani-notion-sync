@@ -8,6 +8,8 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 CARD_LABELS = (
+    "SRS SCENARIO · WK10 LEVEL",
+    "SRS SCENARIO · WK10 FULL",
     "GURU 90% ETA · ACCURACY",
     "GURU 100% ETA · ACCURACY",
     "KANJI MEANING ACCURACY",
@@ -86,6 +88,12 @@ def card_values(level, target, milestone, gate, activity, counts, review,
         v=guru.get(key)
         return f"{v:.1f}%" if v is not None else "— Chưa có dữ liệu"
     result = {
+        "SRS SCENARIO · WK10 LEVEL":(
+            date_label(milestone.get("SRS Scenario Level Date"))+
+            " · nếu review luôn đúng & đúng hạn"),
+        "SRS SCENARIO · WK10 FULL":(
+            date_label(milestone.get("SRS Scenario Full Date"))+
+            " · nếu review luôn đúng & đúng hạn"),
         "GURU 90% ETA · ACCURACY":guru_card("Gate"),
         "GURU 100% ETA · ACCURACY":guru_card("All"),
         "KANJI MEANING ACCURACY":kanji_percent("Kanji Meaning Accuracy"),

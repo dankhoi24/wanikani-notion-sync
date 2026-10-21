@@ -11,6 +11,7 @@ on:
       - 'notion_svg_chart.py'
       - 'unlock_forecast.py'
       - 'wk_detailed.py'
+      - 'guru_forecast.py'
       - 'tests/**'
       - 'milestones.json'
       - '.github/workflows/sync.yml'

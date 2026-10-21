@@ -650,7 +650,8 @@ def main():
                  **sim_dates},
                 gate, activity, counts, review, now, tz,
                 daily_target=daily_target, daily_reviews=daily_reviews,
-                guru_forecast=guru_projection)
+                guru_forecast=guru_projection,
+                simulation=simulation,sim_target=target)
             cards.update(unlock_cards(unlock_estimate,tz))
             updates=update_n5_dashboard(notion, notion_token, n5_dashboard_id,
                                         cards, stamp)

@@ -129,3 +129,37 @@ The N5 live page shows **Lessons Today / Daily Lessons Target**, a Radical/Kanji
 The `WaniKani Snapshots` table stores `Radical 7d Avg`, `Kanji 7d Avg`, `Vocab 7d Avg` and matching 30d rates plus `Gate 7d Avg`, `Gate 30d Avg` and per-type lessons today. `Vocab` includes kana vocabulary. JLPT Milestones shows the 7d split as `Radical Pace (7d)`, `Kanji Pace (7d)`, `Vocab Pace (7d)` and `Gate Pace (7d)`.
 
 For example, starting **3 Kanji + 2 Vocabulary** today results in 5 full lessons/day but only 3 gate-relevant lessons/day. Actual full ETA is therefore not compared to Target ETA (different goals); it is compared to Target Full Lessons ETA. These dates are optimistic planning indicators: a Radical/Kanji started is not automatically one of the subjects needed to satisfy the Guru gate, SRS delays remain, and a single day is a highly unstable estimate. Historical lessons before Tracking Start never enter the new per-type rates.
+
+
+### Kanji-only accuracy-adjusted Guru forecast (current level)
+
+The N5 dashboard and the JLPT Milestones / WaniKani Level Breakdown tables now include
+**Guru 90 ETA (Accuracy)** and **Guru 100 ETA (Accuracy)** plus P10–P90 simulated
+scenario dates and Kanji-specific meaning/reading accuracies. Both dates are
+forecast from current level's individual Kanji assignments, SRS stages and next
+review availability timestamps, NOT lessons/day. **90%** is the level-up Guru
+threshold; **100%** means *every Kanji has reached Guru at least once*, even if
+some later slip below Guru. This is not the same as finishing Vocabulary.
+
+`guru_forecast.py` derives lifetime WaniKani Kanji-only meaning/reading
+correctness (never mixes in Vocabulary); per-subject rates are smoothed using
+all-Kanji history to reduce noisy newest-subject estimates. For each simulated
+review, it models an item as passing only if **both Meaning and Reading**
+succeed (product of the two estimated response probabilities). It models
+failed pre-Guru reviews conservatively as a one-stage Apprentice setback, then
+recomputes the next SRS due time. The simulation assumes reviews are always
+done on time, one failed review session per opportunity, future answer
+performance resembles historical performance, and existing Kanji assignments
+are available to simulate. It does NOT simulate correlated errors, late
+reviews, retrying multiple wrong answers within a single session, or blocked
+Kanji prerequisites. If there is insufficient Kanji accuracy history,
+missing review due times or locked Kanji, the scenario stays blank.
+
+P10/P50/P90 are percentiles across reproducible modeled outcomes, **not
+statistically calibrated confidence intervals**. The P50 for the **current
+level** now informs both actual `ETA` and `Target ETA` level-up forecasts
+instead of assuming perfect Kanji reviews; subsequent future WK levels still
+have optimistic seven-day heuristic SRS floors, so reaching WK10/WK20/WK30
+remains uncertain. `Next Gate Earliest` remains the independent
+perfect-review lower bound for comparison. Re-run GitHub Actions to refresh
+the dates when Kanji SRS states or cumulative accuracy change.

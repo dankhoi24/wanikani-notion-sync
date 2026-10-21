@@ -38,7 +38,7 @@ def conditional_earliest(subjects, assigned, current_level, target_level,
                 "lessons":0}
     tz=ZoneInfo(timezone_name)
     relevant={sid:s for sid,s in subjects.items()
-              if isinstance(s.get("level"),int) and s["level"]<target_level
+              if isinstance(s.get("level"),int) and current_level<=s["level"]<target_level
               and s.get("type") in ("radical","kanji","vocabulary","kana_vocabulary")}
     if not relevant:
         return {"at":None,"status":"No WaniKani subjects for this milestone.",
@@ -66,6 +66,8 @@ def conditional_earliest(subjects, assigned, current_level, target_level,
     events=[]
     serial=0
     for sid in started:
+        if relevant[sid]["type"] not in ("radical","kanji"):
+            continue
         if sid in passed_ids or state[sid]<1:
             continue
         nxt=dt(assigned[sid].get("available_at"))
@@ -88,8 +90,6 @@ def conditional_earliest(subjects, assigned, current_level, target_level,
         s=relevant[sid]
         if s["level"]>level:
             return False
-        if s["level"]<current_level:
-            return bool(assigned.get(sid,{}).get("unlocked_at"))
         return all(comp in passed_ids or passed(assigned.get(comp))
                    for comp in s.get("component_subject_ids",[]))
 

@@ -8,6 +8,11 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 CARD_LABELS = (
+    "GURU 90% ETA · ACCURACY",
+    "GURU 100% ETA · ACCURACY",
+    "KANJI MEANING ACCURACY",
+    "KANJI READING ACCURACY",
+    "KANJI REVIEW SUCCESS · ESTIMATE",
     "LESSONS HÔM NAY",
     "REVIEWS HÔM NAY · ƯỚC TÍNH",
     "LESSONS HÔM NAY THEO LOẠI",
@@ -49,7 +54,7 @@ def bar(pct, width=12):
 
 
 def card_values(level, target, milestone, gate, activity, counts, review,
-                now, timezone, daily_target=None, daily_reviews=None):
+                now, timezone, daily_target=None, daily_reviews=None, guru_forecast=None):
     """Create source-of-truth KPI card values; never infer Guru from lesson starts."""
     passed = milestone.get("Next Gate Passed") or 0
     required = milestone.get("Next Gate Required") or 0
@@ -66,7 +71,26 @@ def card_values(level, target, milestone, gate, activity, counts, review,
         reviews_label="— Chưa đủ checkpoint"
     else:
         reviews_label=f"≈ {number_label(review_count)} review"
+    guru=guru_forecast or {}
+    def guru_card(prefix):
+        p50=guru.get(prefix+" P50")
+        p10=guru.get(prefix+" P10")
+        p90=guru.get(prefix+" P90")
+        if p50 is None or p10 is None or p90 is None:
+            return "— Chưa đủ dữ liệu SRS"
+        return (p50.astimezone(ZoneInfo(timezone)).strftime("%d/%m/%Y")+
+                "\\nP10–P90: "+
+                p10.astimezone(ZoneInfo(timezone)).strftime("%d/%m")+
+                " – "+p90.astimezone(ZoneInfo(timezone)).strftime("%d/%m"))
+    def kanji_percent(key):
+        v=guru.get(key)
+        return f"{v:.1f}%" if v is not None else "— Chưa có dữ liệu"
     result = {
+        "GURU 90% ETA · ACCURACY":guru_card("Gate"),
+        "GURU 100% ETA · ACCURACY":guru_card("All"),
+        "KANJI MEANING ACCURACY":kanji_percent("Kanji Meaning Accuracy"),
+        "KANJI READING ACCURACY":kanji_percent("Kanji Reading Accuracy"),
+        "KANJI REVIEW SUCCESS · ESTIMATE":kanji_percent("Kanji Review Success Pct"),
         "LESSONS HÔM NAY": f"{int(daily_lessons)} / {configured_target} bài · {pct:.0f}%\n{bar(pct)}",
         "REVIEWS HÔM NAY · ƯỚC TÍNH": reviews_label,
         "LESSONS HÔM NAY THEO LOẠI": (

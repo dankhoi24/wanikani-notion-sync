@@ -499,6 +499,100 @@ class SyncTests(unittest.TestCase):
         self.assertIsNotNone(b["at"],b["status"])
         self.assertGreater(a["at"],b["at"])
 
+    def test_multi_level_monte_carlo_tracks_failures_and_unlock_dependency(self):
+        from milestone_monte_carlo import (simulate_milestones,
+            stage_after_review,empirical_accuracy)
+        import random
+        now=datetime(2026,10,21,6,tzinfo=timezone.utc)
+        subjects={
+          1:{"type":"kanji","level":4,"component_subject_ids":[],
+              "spaced_repetition_system_id":8},
+          2:{"type":"radical","level":5,"component_subject_ids":[],
+              "spaced_repetition_system_id":8},
+          3:{"type":"kanji","level":5,"component_subject_ids":[2],
+              "spaced_repetition_system_id":8},
+          4:{"type":"vocabulary","level":5,"component_subject_ids":[3],
+              "spaced_repetition_system_id":8},
+          5:{"type":"radical","level":6,"component_subject_ids":[],
+              "spaced_repetition_system_id":8},
+          6:{"type":"kanji","level":6,"component_subject_ids":[5],
+              "spaced_repetition_system_id":8},
+          7:{"type":"vocabulary","level":6,"component_subject_ids":[6],
+              "spaced_repetition_system_id":8},
+        }
+        assigned={1:{"srs_stage":4,"started_at":"2026-10-20T01:00:00Z",
+                     "available_at":"2026-10-21T12:00:00Z"}}
+        stats=[]
+        for sid,typ in ((1,"kanji"),(2,"radical"),(3,"kanji")):
+            stats.append({"data":{"subject_id":sid,"subject_type":typ,
+                          "meaning_correct":80,"meaning_incorrect":20,
+                          "reading_correct":80 if typ=="kanji" else 0,
+                          "reading_incorrect":20 if typ=="kanji" else 0}})
+        intervals={8:{1:14400,2:28800,3:82800,4:169200}}
+        result=simulate_milestones(subjects,assigned,stats,4,(5,6,7),
+                      now,"Asia/Ho_Chi_Minh",15,intervals,trials=90,seed=37)
+        self.assertTrue(result["valid"],result.get("reason"))
+        for target in (5,6,7):
+            g=result["targets"][target]["gate"]
+            f=result["targets"][target]["full"]
+            self.assertLessEqual(g["P10"],g["P50"])
+            self.assertLessEqual(g["P50"],g["P90"])
+            self.assertLessEqual(g["P50"],f["P50"])
+        self.assertLess(result["targets"][5]["gate"]["P50"],
+                        result["targets"][6]["gate"]["P50"])
+        self.assertLess(result["targets"][6]["gate"]["P50"],
+                        result["targets"][7]["gate"]["P50"])
+        # One incorrect answer at Apprentice 4 drops to Apprentice 3.
+        class Incorrect:
+            def random(self): return 0.9 if self.i == 0 else 0.1
+            def __init__(self): self.i=0
+        rand=random.Random(111)
+        self.assertEqual(stage_after_review(3,"radical",(1.0,None),rand),4)
+        self.assertEqual(stage_after_review(4,"kanji",(1.0,1.0),rand),5)
+
+    def test_monte_carlo_fails_cleanly_without_real_review_accuracy(self):
+        from milestone_monte_carlo import simulate_milestones
+        now=datetime(2026,10,21,6,tzinfo=timezone.utc)
+        s={1:{"type":"kanji","level":4,"component_subject_ids":[],
+              "spaced_repetition_system_id":8}}
+        out=simulate_milestones(s,{},[],4,(5,),now,"Asia/Ho_Chi_Minh",
+                                15,{8:{1:14400,2:28800,3:82800,4:169200}},
+                                trials=30)
+        self.assertFalse(out["valid"])
+        self.assertIn("accuracy",out["reason"])
+
+    def test_monte_carlo_per_subject_review_stats_not_vocabulary(self):
+        from milestone_monte_carlo import empirical_accuracy,item_rates
+        subjects={1:{"type":"radical"},2:{"type":"kanji"},
+                  3:{"type":"vocabulary"}}
+        stats=[]
+        for sid,typ in ((1,"radical"),(2,"kanji"),(3,"vocabulary")):
+            stats.append({"data":{"subject_id":sid,"subject_type":typ,
+                  "meaning_correct":20 if sid!=3 else 0,
+                  "meaning_incorrect":0 if sid!=3 else 50,
+                  "reading_correct":20 if sid==2 else 0,
+                  "reading_incorrect":0 if sid==2 else 50}})
+        rates,ind,counts=empirical_accuracy(subjects,stats)
+        self.assertEqual(rates["kanji"],(1.0,1.0))
+        self.assertEqual(rates["radical"],(1.0,None))
+        self.assertEqual(item_rates(2,"kanji",rates,ind),(1.0,1.0))
+        self.assertEqual(counts["kanji"]["reading"],20)
+
+    def test_monte_carlo_wanikani_srs_penalty_and_hour_alignment(self):
+        from milestone_monte_carlo import stage_after_review,next_hour
+        from datetime import timedelta
+        class OneMistake:
+            def __init__(self):self.calls=0
+            def random(self):
+                self.calls+=1
+                return 0.9 if self.calls==1 else 0.1
+        r=OneMistake()
+        self.assertEqual(stage_after_review(4,"radical",(0.8,None),r),3)
+        self.assertEqual(stage_after_review(3,"radical",(1.0,None),r),4)
+        dt=datetime(2026,10,21,6,21,tzinfo=timezone.utc)
+        self.assertEqual(next_hour(dt),
+                         datetime(2026,10,21,7,tzinfo=timezone.utc))
+
     def test_volume_and_target_projection(self):
         from sync import lessons_per_level,workload_eta
         history=[{"data":{"level":i,"started_at":f"2026-09-{d:02d}T00:00:00Z"}} for i,d in [(1,1),(2,11),(3,21)]]

@@ -179,3 +179,49 @@ have optimistic seven-day heuristic SRS floors, so reaching WK10/WK20/WK30
 remains uncertain. `Next Gate Earliest` remains the independent
 perfect-review lower bound for comparison. Re-run GitHub Actions to refresh
 the dates when Kanji SRS states or cumulative accuracy change.
+
+
+### Stochastic multi-milestone SRS simulation (2026-10-21)
+
+`milestone_monte_carlo.py` runs **160 reproducible joint trajectories** from
+current WaniKani level to WK10, WK20 and WK30, recording six conditional
+calendar outputs for each target: `Sim Level P10/P50/P90` and
+`Sim Full P10/P50/P90`. One trajectory covers *all* targets consistently.
+This is distinct from the all-correct lower-bound columns `SRS Scenario ...`.
+
+**Observed inputs (WaniKani API):** exact current assignment SRS stages,
+`available_at`, subject-to-subject prerequisite IDs, SRS stage interval
+durations, already-started lessons including those started today, the user's
+`Daily Lessons Target` cap, and cumulative
+`review_statistics` of Radical meaning and Kanji meaning/reading.
+Each simulated future review samples a geometric number of wrong answers
+before a correct response for each relevant question and applies WaniKani's
+documented penalty `ceil((wrong_meaning+wrong_reading)/2) *
+(2 if current_stage>=5 else 1)`, with a minimum SRS stage of 1.
+Correct all-parts sessions move up one stage. Review due times are rounded
+to the next hour as WaniKani documents. The next review of already-started
+subjects uses the *observed* API `available_at` timestamp. A subject with
+>=10 past question attempts uses its own measured accuracy; otherwise the
+same subject-type historical accuracy is used (Kanji is never mixed with
+Vocabulary). Missing Radical/Kanji accuracy or SRS timing causes a blank
+simulation rather than fabricated results.
+
+**CONDITIONS NOT LEARNABLE from the API:**
+every future review is completed exactly when due; every currently available
+lesson is started as soon as possible, up to the user's 15/day target; all
+future new items perform like previously learned items of the same type;
+the simulated lesson order is *older levels first*, Radical+Kanji before
+Vocabulary *within* a level. This is one clearly labeled *study-policy
+scenario*, not what the user is guaranteed to do. There is no realistic
+way to compute an assumption-free future completion date with the available
+API. The P10/P50/P90 numbers are *scenario variation caused by stochastic
+review correctness*, **not measured 10%, 50%, 90% probabilities of actual
+future attendance/completion**; lateness, level-specific difficulty changes,
+breaks, subscriptions, unexpected lesson unlocking, and non-WaniKani JLPT
+skills are unmodeled. For this reason, the `ETA` columns for unachieved
+milestones stay **blank**, while simulated dates live in their own columns.
+
+The scenario `Full` date is when all remaining lessons in WK current..
+target-1 have been *started*, including Vocabulary, with the milestone
+gate also satisfied. It does **not** require those Vocabulary to reach Guru,
+Master or Burned. The simulation does not include practice outside WaniKani.

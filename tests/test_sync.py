@@ -542,6 +542,10 @@ class SyncTests(unittest.TestCase):
                         result["targets"][6]["gate"]["P50"])
         self.assertLess(result["targets"][6]["gate"]["P50"],
                         result["targets"][7]["gate"]["P50"])
+        self.assertLess(result["targets"][5]["full"]["P50"],
+                        result["targets"][6]["full"]["P50"])
+        self.assertLess(result["targets"][6]["full"]["P50"],
+                        result["targets"][7]["full"]["P50"])
         # One incorrect answer at Apprentice 4 drops to Apprentice 3.
         class Incorrect:
             def random(self): return 0.9 if self.i == 0 else 0.1

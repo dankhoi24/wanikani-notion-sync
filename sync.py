@@ -7,6 +7,7 @@ import time
 from collections import Counter
 from n5_dashboard import card_values, update_n5_dashboard
 from unlock_forecast import estimate_unlocks_today, unlock_cards
+from guru_forecast import guru_scenarios
 from daily_lessons import history_rows, push_daily_rows
 from notion_svg_chart import update_daily_chart
 from daily_reviews import (most_recent_before_midnight, day_start_utc,
@@ -298,8 +299,14 @@ def main():
     progressions = collection("level_progressions", wk_token)
     stats = collection("review_statistics?subject_types=kanji,vocabulary", wk_token)
     summary = wk("summary", wk_token)["data"]
+    guru_fields={"Guru 90 ETA (Accuracy)","Guru 100 ETA (Accuracy)",
+                 "Guru 90 ETA Range","Guru 100 ETA Range",
+                 "Kanji Meaning Accuracy","Kanji Reading Accuracy",
+                 "Kanji Review Success Pct","Guru Forecast Note"}
     validate_source(required("NOTION_LEVEL_BREAKDOWN_DATA_SOURCE_ID"),
-                    {"Name","Level","Lessons Remaining","Kanji To Guru","Min Reviews to Gate"},notion_token)
+                    {"Name","Level","Lessons Remaining","Kanji To Guru",
+                     "Min Reviews to Gate",*guru_fields},notion_token)
+    validate_source(milestones_id,guru_fields,notion_token)
     validate_source(required("NOTION_REVIEW_CHECKPOINTS_DATA_SOURCE_ID"),
                     {"Name","Captured At","Meaning Correct Total","Reviews Since Baseline"},notion_token)
     subject_rows = collection("subjects", wk_token)
@@ -307,6 +314,37 @@ def main():
     assigned = assignments_by_id(assignments)
     review_stats_all = collection("review_statistics", wk_token)
     counters = review_counters(review_stats_all)
+    # Review-accuracy-adjusted current-level Guru dates use actual per-Kanji
+    # statistics (NOT vocabulary) and each Kanji's SRS next-review schedule.
+    srs_intervals=intervals_from_srs(collection("spaced_repetition_systems",wk_token))
+    guru_projection=guru_scenarios(
+        subjects,assigned,review_stats_all,level,now,srs_intervals)
+    print("Current-level Guru scenarios:",
+          "accuracy meaning=",guru_projection["Kanji Meaning Accuracy"],
+          "reading=",guru_projection["Kanji Reading Accuracy"],
+          "90% P50=",guru_projection["Gate P50"],
+          "100% P50=",guru_projection["All P50"],
+          "valid=",guru_projection["Simulation Valid"],
+          "note=",guru_projection["Simulation Note"])
+    def range_text(prefix):
+        lo,hi=guru_projection.get(prefix+" P10"),guru_projection.get(prefix+" P90")
+        if lo is None or hi is None:
+            return "Unavailable — insufficient SRS/accuracy history"
+        from zoneinfo import ZoneInfo
+        zone=ZoneInfo(tz)
+        return (lo.astimezone(zone).strftime("%d/%m/%Y") + " — " +
+                hi.astimezone(zone).strftime("%d/%m/%Y") + " (P10–P90; on-time reviews)")
+    guru_numbers={
+        "Kanji Meaning Accuracy":guru_projection["Kanji Meaning Accuracy"],
+        "Kanji Reading Accuracy":guru_projection["Kanji Reading Accuracy"],
+        "Kanji Review Success Pct":guru_projection["Kanji Review Success Pct"]}
+    guru_dates={
+        "Guru 90 ETA (Accuracy)":guru_projection["Gate P50"],
+        "Guru 100 ETA (Accuracy)":guru_projection["All P50"]}
+    guru_rich={
+        "Guru 90 ETA Range":range_text("Gate"),
+        "Guru 100 ETA Range":range_text("All"),
+        "Guru Forecast Note":guru_projection["Simulation Note"]}
     target_config = json.loads(Path(__file__).with_name("milestones.json").read_text(encoding="utf-8"))
     max_target = min(60,max(int(x["target_wk_level"]) for x in target_config))
     levels = inventory(subjects,assigned,level,max_target)
@@ -355,8 +393,12 @@ def main():
         rich={"Note":"Review completed count is a lower-bound proxy based on correct meaning answers; API does not expose exact review-event history."})
     upsert(checkpoints_id,"Name",now.strftime("Checkpoint %Y-%m-%d %H:%M UTC"),checkpoint,notion_token)
     for row in levels:
-        value=props("Name",f"WK Level {row['Level']}",{k:v for k,v in row.items()},
-                    dates={"Last Synced":now})
+        # Only current-level Kanji have populated assignments and review history.
+        is_current=(row["Level"]==level)
+        value=props("Name",f"WK Level {row['Level']}",
+                    {**row,**(guru_numbers if is_current else {})},
+                    dates={"Last Synced":now,**(guru_dates if is_current else {})},
+                    rich=(guru_rich if is_current else {}))
         upsert(detail_id,"Name",f"WK Level {row['Level']}",value,notion_token)
     pace, observations, current_started = median_level_days(progressions, level)
     counts = metrics(assignments, stats, summary, now)
@@ -415,9 +457,12 @@ def main():
     print(f"WaniKani level={level}; target={daily_target}; full7d={activity['Lessons 7d Avg']}; gate7d={activity['Gate 7d Avg']}; radical7d={activity['Radical 7d Avg']}; kanji7d={activity['Kanji 7d Avg']}; vocab7d={activity['Vocab 7d Avg']}; inventory ETA")
     print("Snapshot", upsert(snaps_id, "Name", key, snap, notion_token))
     config = target_config
-    srs_intervals=intervals_from_srs(collection("spaced_repetition_systems",wk_token))
     earliest_gate=earliest_next_gate(subjects,assigned,level,now,srs_intervals)
     unlock_estimate=estimate_unlocks_today(subjects,assigned,level,now,tz)
+    # The current level is limited by Kanji SRS/Guru even when all its Kanji
+    # lessons have ALREADY been started. P50 includes plausible wrong answers.
+    # Future-level SRS floors are still optimistic heuristics, not simulations.
+    gate_review_eta=guru_projection.get("Gate P50") or earliest_gate
     print("Conditional unlock forecast local date:", unlock_estimate["date"],
           "already available:", unlock_estimate["available_now"],
           "additional possible:", unlock_estimate["potential_today"],
@@ -428,9 +473,9 @@ def main():
             raise ValueError("Milestone target must be a WaniKani level 1..60")
         title = item["name"]
         eta = (forecast(target,level,None,None,now,progressions) if level>=target
-               else forecast_with_inventory(levels,level,target,gate_rate,now,earliest_gate))
+               else forecast_with_inventory(levels,level,target,gate_rate,now,gate_review_eta))
         target_eta = (eta if level>=target else
-                      forecast_with_inventory(levels,level,target,daily_target,now,earliest_gate))
+                      forecast_with_inventory(levels,level,target,daily_target,now,gate_review_eta))
         full_target_eta = forecast_full_lessons(levels,level,target,daily_target,now,target_eta)
         # Without any observed Radical/Kanji learning, future levels cannot
         # be reached at the observed lesson mix: do not invent a completion ETA.
@@ -452,7 +497,10 @@ def main():
                 "Radical+Kanji+Vocabulary+Kana Vocabulary starts/day and "
                 "all unstarted lessons; cannot precede actual gate ETA. "
                 "Targets use 15 total lessons/day under optimistic allocation. "
-                "Future-level SRS floor=7 days/level, accuracy not a probability.")
+                "Current-level Guru ETA uses per-Kanji Meaning/Reading "
+                "review accuracy and assignment.available_at Monte Carlo P50 "
+                "(on-time scenario); future-level SRS floor remains an "
+                "optimistic 7 days/level. P10–P90 ranges are NOT calibrated confidence.")
         days_left = max(0, (eta - now.date()).days) if eta else None
         basis=(f"WaniKani level proxy, NOT JLPT readiness. "
                f"Actual new lessons/day: 7d total={activity['Lessons 7d Avg']}, "
@@ -462,7 +510,10 @@ def main():
                f"Gate ETA pace={gate_rate} ({gate_source}); "
                f"full ETA pace={full_rate} ({full_source}); target={daily_target}; "
                f"tracking start={tracking_start}, elapsed={activity['Elapsed Days']} days. "
-               f"Inventory from WaniKani API, current earliest Guru bound={earliest_gate}; "
+               f"Inventory from WaniKani API, perfect-review earliest Guru={earliest_gate}; "
+               f"Kanji review accuracy-adjusted Guru P50={guru_projection['Gate P50']}; "
+               f"Kanji meaning accuracy={guru_projection['Kanji Meaning Accuracy']}, "
+               f"reading accuracy={guru_projection['Kanji Reading Accuracy']}. "
                f"future SRS floor=7d/level (heuristic). "
                f"Full ETA is optimistic; R+K allocation and review accuracy may delay it.")
         extra=milestone_inventory(levels,level,target)
@@ -470,6 +521,7 @@ def main():
                            {"Target WK Level": target, "Progress Pct": round(min(100,level/target*100),1),
                             "Days Left": days_left,"Actual Pace":actual,"Recent Pace (7d)":activity["Lessons 7d Avg"],"Lessons/Level":volume,
                             "Review Accuracy New":review["Review Accuracy New"],
+                            **guru_numbers,
                             "Gate Pace (7d)":activity["Gate 7d Avg"],
                             "Gate Pace (30d)":activity["Gate 30d Avg"],
                             "Radical Pace (7d)":activity["Radical 7d Avg"],
@@ -478,10 +530,10 @@ def main():
                            dates={"Start": tracking_start, "ETA": eta, "Target ETA":target_eta,
                                   "Actual Full Lessons ETA":actual_full_eta,
                                   "Target Full Lessons ETA":full_target_eta,
-                                  "Next Gate Earliest":earliest_gate},
+                                  "Next Gate Earliest":earliest_gate,**guru_dates},
                            rich={"Basis": basis,"ETA Status":eta_status,
                                  "Full ETA Status":full_eta_status,
-                                 "Forecast Method":method})
+                                 "Forecast Method":method,**guru_rich})
         print(title, upsert(milestones_id, "Milestone", title, properties, notion_token),
               "ETA:", eta or "insufficient history")
         n5_dashboard_id=os.environ.get("NOTION_N5_DASHBOARD_PAGE_ID", "").strip()
@@ -492,7 +544,8 @@ def main():
                  "Actual Full Lessons ETA":actual_full_eta,
                  "Target Full Lessons ETA":full_target_eta},
                 gate, activity, counts, review, now, tz,
-                daily_target=daily_target, daily_reviews=daily_reviews)
+                daily_target=daily_target, daily_reviews=daily_reviews,
+                guru_forecast=guru_projection)
             cards.update(unlock_cards(unlock_estimate,tz))
             updates=update_n5_dashboard(notion, notion_token, n5_dashboard_id,
                                         cards, stamp)

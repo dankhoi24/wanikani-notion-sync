@@ -535,10 +535,19 @@ def main():
                f"Kanji review accuracy-adjusted Guru P50={guru_projection['Gate P50']}; "
                f"Kanji meaning accuracy={guru_projection['Kanji Meaning Accuracy']}, "
                f"reading accuracy={guru_projection['Kanji Reading Accuracy']}. "
-               f"future SRS floor=7d/level (heuristic). "
+               f"Future SRS progression uses API stage intervals (not 7d/level). "
                f"Future milestone ETA withheld; staged scenario only. "
                f"Scenario level={conditional_level}; scenario full={conditional_full}.")
         extra=milestone_inventory(levels,level,target)
+        # WK4 Guru 90/100 applies to CURRENT level, not to WK20/WK30.
+        # Avoid copying WK4 dates into unrelated milestone rows.
+        primary=(target==min(int(x["target_wk_level"]) for x in config))
+        row_guru_dates=(guru_dates if primary else
+                        {key:None for key in guru_dates})
+        row_guru_rich=(guru_rich if primary else {
+            "Guru 90 ETA Range":f"Current WK{level} Guru forecast is shown only in the N5 row.",
+            "Guru 100 ETA Range":f"Current WK{level} Guru forecast is shown only in the N5 row.",
+            "Guru Forecast Note":f"Not a Guru forecast for milestone WK{target}."})
         properties = props("Milestone", title,
                            {"Target WK Level": target, "Progress Pct": round(min(100,level/target*100),1),
                             "Days Left": days_left,"Actual Pace":actual,"Recent Pace (7d)":activity["Lessons 7d Avg"],"Lessons/Level":volume,
@@ -552,13 +561,13 @@ def main():
                            dates={"Start": tracking_start, "ETA": eta, "Target ETA":target_eta,
                                   "Actual Full Lessons ETA":actual_full_eta,
                                   "Target Full Lessons ETA":full_target_eta,
-                                  "Next Gate Earliest":earliest_gate,**guru_dates,
+                                  "Next Gate Earliest":earliest_gate,**row_guru_dates,
                                   "SRS Scenario Level Date":conditional_level,
                                   "SRS Scenario Full Date":conditional_full},
                            rich={"Basis": basis,"ETA Status":eta_status,
                                  "Full ETA Status":full_eta_status,
                                  "Forecast Method":method,
-                                 "Evidence & Limits":evidence,**guru_rich})
+                                 "Evidence & Limits":evidence,**row_guru_rich})
         print(title, upsert(milestones_id, "Milestone", title, properties, notion_token),
               "ETA:", eta or "insufficient history")
         n5_dashboard_id=os.environ.get("NOTION_N5_DASHBOARD_PAGE_ID", "").strip()

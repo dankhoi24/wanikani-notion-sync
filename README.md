@@ -1,5 +1,21 @@
 # WaniKani → Notion JLPT dashboard
 
+> **2026-10-21 milestone forecast correction:** `ETA`, `Target ETA`,
+> `Actual Full Lessons ETA` and `Target Full Lessons ETA` are intentionally
+> **blank for future milestones**: no historical user data contains the future
+> reviews, unlock schedule and study compliance for WK10/20/30. These fields
+> formerly used an unjustified 7-days-per-level floor and lessons/day
+> extrapolation; those dates must **not** be relied on. The separate
+> `SRS Scenario Level Date` / `SRS Scenario Full Date` fields use
+> real WaniKani subject prerequisites, observed current SRS schedules,
+> official API SRS intervals and the configured daily lesson cap. This
+> produces a CONDITIONAL **all-correct, on-time** path, **not a prediction**.
+> Current-level `Guru 90 ETA (Accuracy)` and `Guru 100 ETA (Accuracy)`
+> use kanji-only Meaning/Reading accuracy and current individual SRS stages,
+> with P10–P90 simulated scenario ranges. No fixed 7-day/level delay remains.
+> All WK10/20/30 labels are proxies; none claims JLPT readiness.
+
+
 This repository synchronizes WaniKani v2 statistics to a private Notion dashboard using GitHub Actions. Python 3.12 and standard library only.
 
 **Already created in your Notion workspace:**

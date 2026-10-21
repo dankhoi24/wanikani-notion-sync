@@ -8,6 +8,7 @@ from collections import Counter
 from n5_dashboard import card_values, update_n5_dashboard
 from unlock_forecast import estimate_unlocks_today, unlock_cards
 from guru_forecast import guru_scenarios
+from milestone_bounds import conditional_earliest
 from daily_lessons import history_rows, push_daily_rows
 from notion_svg_chart import update_daily_chart
 from daily_reviews import (most_recent_before_midnight, day_start_utc,
@@ -294,7 +295,9 @@ def main():
     validate_source(settings_id, {"Name","Daily Lessons Target","Timezone","Tracking Start"}, notion_token)
     daily_target,tz,tracking_start = learning_settings(settings_id,notion_token)
     now = datetime.now(timezone.utc)
-    level = wk("user", wk_token)["data"]["level"]
+    user_data=wk("user", wk_token)["data"]
+    level=user_data["level"]
+    granted_level=(user_data.get("subscription") or {}).get("max_level_granted")
     assignments = collection("assignments", wk_token)
     progressions = collection("level_progressions", wk_token)
     stats = collection("review_statistics?subject_types=kanji,vocabulary", wk_token)
@@ -306,7 +309,8 @@ def main():
     validate_source(required("NOTION_LEVEL_BREAKDOWN_DATA_SOURCE_ID"),
                     {"Name","Level","Lessons Remaining","Kanji To Guru",
                      "Min Reviews to Gate",*guru_fields},notion_token)
-    validate_source(milestones_id,guru_fields,notion_token)
+    validate_source(milestones_id,guru_fields | {
+        "SRS Scenario Level Date","SRS Scenario Full Date","Evidence & Limits"},notion_token)
     validate_source(required("NOTION_REVIEW_CHECKPOINTS_DATA_SOURCE_ID"),
                     {"Name","Captured At","Meaning Correct Total","Reviews Since Baseline"},notion_token)
     subject_rows = collection("subjects", wk_token)
@@ -472,35 +476,52 @@ def main():
         if target < 1 or target > 60:
             raise ValueError("Milestone target must be a WaniKani level 1..60")
         title = item["name"]
-        eta = (forecast(target,level,None,None,now,progressions) if level>=target
-               else forecast_with_inventory(levels,level,target,gate_rate,now,gate_review_eta))
-        target_eta = (eta if level>=target else
-                      forecast_with_inventory(levels,level,target,daily_target,now,gate_review_eta))
-        full_target_eta = forecast_full_lessons(levels,level,target,daily_target,now,target_eta)
-        # Without any observed Radical/Kanji learning, future levels cannot
-        # be reached at the observed lesson mix: do not invent a completion ETA.
-        actual_full_eta = (forecast_full_lessons(
-            levels,level,target,full_rate,now,eta)
-            if level>=target or gate_rate is not None else None)
-        eta_status = ("Achieved" if level >= target else
-                      "Paused: 0 Radical/Kanji pace" if gate_rate is None else
-                      "Gate pace (R+K): 7-day" if gate_source=="observed_recent_7d" else
-                      "Gate pace (R+K): 30-day")
-        full_eta_status = ("Achieved" if level >= target else
-                           "Paused: no new lessons" if full_rate is None else
-                           "Blocked: no Radical/Kanji pace" if gate_rate is None else
-                           "Full pace: 7-day" if full_source=="observed_recent_7d" else
-                           "Full pace: 30-day")
-        method=("Actual level ETA: Radical+Kanji starts/day (7d, then 30d), "
-                "gate-only per-level lessons + current Guru/SRS; Vocabulary "
-                "does NOT count as gate pace. Actual Full Lessons ETA: all "
-                "Radical+Kanji+Vocabulary+Kana Vocabulary starts/day and "
-                "all unstarted lessons; cannot precede actual gate ETA. "
-                "Targets use 15 total lessons/day under optimistic allocation. "
-                "Current-level Guru ETA uses per-Kanji Meaning/Reading "
-                "review accuracy and assignment.available_at Monte Carlo P50 "
-                "(on-time scenario); future-level SRS floor remains an "
-                "optimistic 7 days/level. P10–P90 ranges are NOT calibrated confidence.")
+        # There is no factual future review timetable for the locked Kanji in
+        # WK5..WK30. Remove prior invented dates: 7 days/level and historic
+        # lessons/day ARE NOT valid forecasts for not-yet-unlocked levels.
+        # Instead publish a separately named CONDITIONAL SRS scenario
+        # supported by actual subject dependencies and published SRS timings.
+        if granted_level is not None and granted_level<target:
+            scenario_gate={"at":None,"status":(
+                f"Subscription currently grants WK{granted_level}, below target WK{target}.")}
+            scenario_full=dict(scenario_gate)
+        else:
+            scenario_gate=conditional_earliest(
+                subjects,assigned,level,target,now,tz,daily_target,srs_intervals,
+                lessons_today=activity["Lessons Today"],include_vocab=False)
+            scenario_full=conditional_earliest(
+                subjects,assigned,level,target,now,tz,daily_target,srs_intervals,
+                lessons_today=activity["Lessons Today"],include_vocab=True)
+        conditional_level=scenario_gate.get("at")
+        conditional_full=scenario_full.get("at")
+        # Do NOT represent conditional all-correct schedules as actual ETA.
+        achieved=level>=target
+        eta=forecast(target,level,None,None,now,progressions) if achieved else None
+        actual_full_eta=eta if achieved else None
+        target_eta=None
+        full_target_eta=None
+        eta_status=("Achieved" if achieved else
+                    "Not estimable: future Kanji reviews are not scheduled")
+        full_eta_status=("Achieved" if achieved else
+                         "Not estimable: future lesson unlocks are unknown")
+        method=("Observed WK stage/available_at and Kanji-specific historical "
+                "accuracy support only current-level P10/P50/P90 Guru scenarios. "
+                "The milestone SRS Scenario dates are conditional calendars "
+                "computed from actual subject component prerequisites, API SRS "
+                "intervals and a strict 15 lessons/day upper limit. ALL future "
+                "reviews must be correct and on time; future unlocks/attendance "
+                "and correctness are unobserved. Thus no actual or target "
+                "milestone ETA is published for WK levels not yet reached. "
+                "No 7-day-per-level heuristic. No claim of JLPT readiness.")
+        evidence=(f"Observed current WK={level}, Kanji Guru="
+                  f"{guru_projection['Guru Passed']}/{guru_projection['Guru Required']}; "
+                  f"Kanji meaning accuracy={guru_projection['Kanji Meaning Accuracy']}%, "
+                  f"reading={guru_projection['Kanji Reading Accuracy']}%; "
+                  f"current-level Guru P50={guru_projection['Gate P50']}; "
+                  f"scenario level={conditional_level} ({scenario_gate['status']}); "
+                  f"scenario full={conditional_full} ({scenario_full['status']}); "
+                  "Future milestone actual ETA UNKNOWN. Only currently scheduled "
+                  "reviews are facts; later due times and outcomes are conditional.")
         days_left = max(0, (eta - now.date()).days) if eta else None
         basis=(f"WaniKani level proxy, NOT JLPT readiness. "
                f"Actual new lessons/day: 7d total={activity['Lessons 7d Avg']}, "
@@ -515,7 +536,8 @@ def main():
                f"Kanji meaning accuracy={guru_projection['Kanji Meaning Accuracy']}, "
                f"reading accuracy={guru_projection['Kanji Reading Accuracy']}. "
                f"future SRS floor=7d/level (heuristic). "
-               f"Full ETA is optimistic; R+K allocation and review accuracy may delay it.")
+               f"Future milestone ETA withheld; staged scenario only. "
+               f"Scenario level={conditional_level}; scenario full={conditional_full}.")
         extra=milestone_inventory(levels,level,target)
         properties = props("Milestone", title,
                            {"Target WK Level": target, "Progress Pct": round(min(100,level/target*100),1),
@@ -530,10 +552,13 @@ def main():
                            dates={"Start": tracking_start, "ETA": eta, "Target ETA":target_eta,
                                   "Actual Full Lessons ETA":actual_full_eta,
                                   "Target Full Lessons ETA":full_target_eta,
-                                  "Next Gate Earliest":earliest_gate,**guru_dates},
+                                  "Next Gate Earliest":earliest_gate,**guru_dates,
+                                  "SRS Scenario Level Date":conditional_level,
+                                  "SRS Scenario Full Date":conditional_full},
                            rich={"Basis": basis,"ETA Status":eta_status,
                                  "Full ETA Status":full_eta_status,
-                                 "Forecast Method":method,**guru_rich})
+                                 "Forecast Method":method,
+                                 "Evidence & Limits":evidence,**guru_rich})
         print(title, upsert(milestones_id, "Milestone", title, properties, notion_token),
               "ETA:", eta or "insufficient history")
         n5_dashboard_id=os.environ.get("NOTION_N5_DASHBOARD_PAGE_ID", "").strip()
@@ -542,7 +567,9 @@ def main():
                 level, target,
                 {**extra, "ETA":eta, "Target ETA":target_eta,
                  "Actual Full Lessons ETA":actual_full_eta,
-                 "Target Full Lessons ETA":full_target_eta},
+                 "Target Full Lessons ETA":full_target_eta,
+                 "SRS Scenario Level Date":conditional_level,
+                 "SRS Scenario Full Date":conditional_full},
                 gate, activity, counts, review, now, tz,
                 daily_target=daily_target, daily_reviews=daily_reviews,
                 guru_forecast=guru_projection)

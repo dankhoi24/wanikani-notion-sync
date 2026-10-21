@@ -12,6 +12,7 @@ on:
       - 'unlock_forecast.py'
       - 'wk_detailed.py'
       - 'guru_forecast.py'
+      - 'milestone_bounds.py'
       - 'tests/**'
       - 'milestones.json'
       - '.github/workflows/sync.yml'

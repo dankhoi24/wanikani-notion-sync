@@ -13,6 +13,7 @@ on:
       - 'wk_detailed.py'
       - 'guru_forecast.py'
       - 'milestone_bounds.py'
+      - 'milestone_monte_carlo.py'
       - 'tests/**'
       - 'milestones.json'
       - '.github/workflows/sync.yml'

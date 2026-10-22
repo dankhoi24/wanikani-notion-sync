@@ -327,6 +327,7 @@ def simulate_milestones(subjects,assigned,review_stats,current_level,targets,
         item_p[sid]=p
     rng=random.Random(seed)
     observed={t:{"gate":[],"full":[]} for t in targets}
+    gate_by_run=[]
     for run in range(trials):
         try:
             result_run=_simulate_once(
@@ -335,6 +336,7 @@ def simulate_milestones(subjects,assigned,review_stats,current_level,targets,
         except ValueError as err:
             result["reason"]=f"Scenario #{run+1} cannot complete: {err}"
             return result
+        gate_by_run.append(dict(result_run["gate"]))
         for target in targets:
             observed[target]["gate"].append(result_run["gate"][target])
             observed[target]["full"].append(result_run["full"][target])
@@ -345,5 +347,46 @@ def simulate_milestones(subjects,assigned,review_stats,current_level,targets,
                 "P90":values[round(.9*(trials-1))]}
     result["targets"]={t:{k:quantiles(v) for k,v in pairs.items()}
                        for t,pairs in observed.items()}
+    # Distinguish partial days remaining in CURRENT level from the complete
+    # WK5, WK6, ... levels, measured gate-to-gate within SAME run.
+    # Not the difference between separate P50 marginal timestamps.
+    day=86400
+    level_days={}
+    # Compute with unsorted paired trajectories collected during simulation.
+    # gate_by_run retains paired dates; never re-pair separately sorted marginals.
+    if gate_by_run:
+        for target in targets:
+            source=target-1
+            if source!=current_level and source not in targets:
+                continue
+            durations=[
+                (trace[target]-(now if source==current_level else trace[source])).total_seconds()/day
+                for trace in gate_by_run
+            ]
+            values=sorted(durations)
+            level_days[source]={
+                "P10":round(values[round(.1*(trials-1))],2),
+                "P50":round(values[round(.5*(trials-1))],2),
+                "P90":round(values[round(.9*(trials-1))],2),
+                "Mean":round(sum(values)/len(values),2),
+                "Partial":source==current_level
+            }
+    result["level_days"]=level_days
+    complete=[p["Mean"] for p in level_days.values() if not p["Partial"]]
+    result["average_complete_level_days"]=(
+        round(sum(complete)/len(complete),2) if complete else None)
+    result["level_inventory"]={
+        level:{
+            "Radical":sum(s.get("type")=="radical" for sid,s in subjects.items()
+                          if s.get("level")==level),
+            "Kanji":sum(s.get("type")=="kanji" for sid,s in subjects.items()
+                        if s.get("level")==level),
+            "Vocab":sum(s.get("type") in ("vocabulary","kana_vocabulary")
+                        for sid,s in subjects.items() if s.get("level")==level),
+            "Unstarted":sum(not assigned.get(sid,{}).get("started_at")
+                            for sid,s in subjects.items()
+                            if s.get("level")==level and s.get("type") in TYPES)
+        } for level in level_days
+    }
     result["valid"]=True
     return result

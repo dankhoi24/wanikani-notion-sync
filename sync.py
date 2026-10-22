@@ -478,8 +478,12 @@ def main():
     gate_review_eta=guru_projection.get("Gate P50") or earliest_gate
     sim_targets=tuple(sorted({int(x["target_wk_level"]) for x in target_config
                               if int(x["target_wk_level"])>level}))
+    # Track ALL intervening WK levels in the SAME Monte Carlo trajectories:
+    # allows paired gate-to-gate duration estimates rather than subtracting
+    # independently sorted milestone quantiles.
+    sim_detail_targets=tuple(range(level+1,max(sim_targets)+1)) if sim_targets else ()
     simulation=(simulate_milestones(
-        subjects,assigned,review_stats_all,level,sim_targets,now,tz,
+        subjects,assigned,review_stats_all,level,sim_detail_targets,now,tz,
         daily_target,srs_intervals,lessons_today=activity["Lessons Today"],
         trials=160,seed=20261021)
         if sim_targets and (granted_level is None or
@@ -493,6 +497,20 @@ def main():
           "runs=",simulation.get("trials"),
           "sample gate P50=",[(t,simulation.get("targets",{}).get(t,{}).get(
              "gate",{}).get("P50")) for t in sim_targets])
+    if simulation["valid"]:
+        per_level=simulation.get("level_days",{})
+        groups={}
+        for lo,hi,label in ((5,9,"WK5-9"),(10,19,"WK10-19"),(20,29,"WK20-29")):
+            values=[per_level[l]["Mean"] for l in range(lo,hi+1) if l in per_level]
+            groups[label]=round(sum(values)/len(values),2) if values else None
+        diagnostic={"current_level":level,"sample_time_utc":now.isoformat(),
+                    "target_lessons_per_day":daily_target,
+                    "trials":simulation["trials"],
+                    "average_full_level_days":simulation.get("average_complete_level_days"),
+                    "group_means":groups,
+                    "per_level":{str(k):{**v,**simulation["level_inventory"].get(k,{})}
+                                 for k,v in per_level.items()}}
+        print("LEVEL_SIM_DIAGNOSTICS_JSON="+json.dumps(diagnostic,ensure_ascii=False))
     print("Conditional unlock forecast local date:", unlock_estimate["date"],
           "already available:", unlock_estimate["available_now"],
           "additional possible:", unlock_estimate["potential_today"],

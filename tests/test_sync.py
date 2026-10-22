@@ -546,6 +546,18 @@ class SyncTests(unittest.TestCase):
                         result["targets"][6]["full"]["P50"])
         self.assertLess(result["targets"][6]["full"]["P50"],
                         result["targets"][7]["full"]["P50"])
+        # Per-level durations are paired gate-to-gate within each stochastic
+        # trajectory, not a subtraction of marginal milestone P50s.
+        self.assertTrue(result["level_days"][4]["Partial"])
+        self.assertFalse(result["level_days"][5]["Partial"])
+        self.assertFalse(result["level_days"][6]["Partial"])
+        self.assertGreater(result["level_days"][5]["Mean"],0)
+        self.assertGreater(result["average_complete_level_days"],0)
+        self.assertEqual(result["level_inventory"][5]["Radical"],1)
+        self.assertEqual(result["level_inventory"][5]["Kanji"],1)
+        self.assertEqual(result["level_inventory"][5]["Vocab"],1)
+        self.assertEqual(result["level_inventory"][5]["Unstarted"],3)
+
         # One incorrect answer at Apprentice 4 drops to Apprentice 3.
         class Incorrect:
             def random(self): return 0.9 if self.i == 0 else 0.1

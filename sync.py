@@ -309,7 +309,10 @@ def main():
                  "Kanji Review Success Pct","Guru Forecast Note"}
     validate_source(required("NOTION_LEVEL_BREAKDOWN_DATA_SOURCE_ID"),
                     {"Name","Level","Lessons Remaining","Kanji To Guru",
-                     "Min Reviews to Gate",*guru_fields},notion_token)
+                     "Min Reviews to Gate",*guru_fields,
+                     "Unlock P10","Unlock P50","Unlock P90",
+                     "Days to Next Mean","Days to Next P10","Days to Next P90",
+                     "Unlock Forecast Status"},notion_token)
     sim_date_fields={"Sim Level P10","Sim Level P50","Sim Level P90",
                      "Sim Full P10","Sim Full P50","Sim Full P90"}
     sim_numeric_fields={"Sim Trials","Sim Accuracy Kanji Meaning",
@@ -405,14 +408,6 @@ def main():
         dates={"Captured At":now},
         rich={"Note":"Review completed count is a lower-bound proxy based on correct meaning answers; API does not expose exact review-event history."})
     upsert(checkpoints_id,"Name",now.strftime("Checkpoint %Y-%m-%d %H:%M UTC"),checkpoint,notion_token)
-    for row in levels:
-        # Only current-level Kanji have populated assignments and review history.
-        is_current=(row["Level"]==level)
-        value=props("Name",f"WK Level {row['Level']}",
-                    {**row,**(guru_numbers if is_current else {})},
-                    dates={"Last Synced":now,**(guru_dates if is_current else {})},
-                    rich=(guru_rich if is_current else {}))
-        upsert(detail_id,"Name",f"WK Level {row['Level']}",value,notion_token)
     pace, observations, current_started = median_level_days(progressions, level)
     counts = metrics(assignments, stats, summary, now)
     activity,started_at=lesson_activity(assignments,now,tz,tracking_start)
@@ -511,6 +506,44 @@ def main():
                     "per_level":{str(k):{**v,**simulation["level_inventory"].get(k,{})}
                                  for k,v in per_level.items()}}
         print("LEVEL_SIM_DIAGNOSTICS_JSON="+json.dumps(diagnostic,ensure_ascii=False))
+        # Preserve exact projected level-entry P10/P50/P90 dates, not a
+        # cumulative 12.04-day/level approximation. Log them for verification.
+        from zoneinfo import ZoneInfo
+        zone=ZoneInfo(tz)
+        all_unlocks={str(i):{
+            k:v.astimezone(zone).strftime("%Y-%m-%d") for k,v in
+            simulation["targets"][i]["gate"].items()}
+            for i in sorted(simulation["targets"])}
+        print("LEVEL_UNLOCKS_JSON="+json.dumps(all_unlocks,sort_keys=True))
+    # One upsert for each level: real inventory AND simulation-derived
+    # unlock dates. If simulation cannot be computed, dates are cleared.
+    for row in levels:
+        lv=row["Level"]
+        is_current=(lv==level)
+        outcome=simulation.get("targets",{}).get(lv,{}).get("gate",{})
+        duration=simulation.get("level_days",{}).get(lv,{})
+        unlock_fields={
+            "Unlock P10":outcome.get("P10"),
+            "Unlock P50":outcome.get("P50"),
+            "Unlock P90":outcome.get("P90")}
+        days_fields={
+            "Days to Next Mean":duration.get("Mean"),
+            "Days to Next P10":duration.get("P10"),
+            "Days to Next P90":duration.get("P90")}
+        forecast_status=("Conditional 160-run review-error simulation, daily "
+                         f"lessons cap {daily_target}; review all due items "
+                         "immediately, lessons when unlocked. Not an actual "
+                         "promise or calibrated confidence interval."
+                         if simulation.get("valid") else
+                         "No estimate: "+str(simulation.get("reason")))
+        value=props("Name",f"WK Level {lv}",
+                    {**row,**(guru_numbers if is_current else {}),**days_fields},
+                    dates={"Last Synced":now,
+                           **(guru_dates if is_current else {}),
+                           **unlock_fields},
+                    rich={**(guru_rich if is_current else {}),
+                          "Unlock Forecast Status":forecast_status})
+        upsert(detail_id,"Name",f"WK Level {lv}",value,notion_token)
     print("Conditional unlock forecast local date:", unlock_estimate["date"],
           "already available:", unlock_estimate["available_now"],
           "additional possible:", unlock_estimate["potential_today"],

@@ -7,6 +7,8 @@ on:
       - 'sync.py'
       - 'n5_dashboard.py'
       - 'daily_reviews.py'
+      - 'daily_discipline.py'
+      - 'notion_review_chart.py'
       - 'daily_lessons.py'
       - 'notion_svg_chart.py'
       - 'unlock_forecast.py'

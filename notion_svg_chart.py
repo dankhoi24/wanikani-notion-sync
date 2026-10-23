@@ -73,14 +73,14 @@ def chart_svg(rows, now, tz):
     return svg
 
 
-def send_svg(notion,token,svg):
+def send_svg(notion,token,svg,filename=NAME):
     upload=notion("POST","/file_uploads",token,{
-        "filename":NAME,"content_type":"image/svg+xml"})
+        "filename":filename,"content_type":"image/svg+xml"})
     file_id=upload["id"]
     if not re.fullmatch(r"[0-9a-fA-F-]{36}",file_id):
         raise ValueError("Invalid Notion file-upload identifier")
     boundary="n5-wanikani-chart-svg"
-    header=(f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{NAME}\"\r\n"
+    header=(f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n"
             "Content-Type: image/svg+xml\r\n\r\n").encode()
     data=header+svg+f"\r\n--{boundary}--\r\n".encode()
     request=Request(f"https://api.notion.com/v1/file_uploads/{file_id}/send",

@@ -12,6 +12,8 @@ from milestone_bounds import conditional_earliest
 from milestone_monte_carlo import simulate_milestones
 from daily_lessons import history_rows, push_daily_rows
 from notion_svg_chart import update_daily_chart
+from notion_review_chart import update_discipline_chart
+from daily_discipline import reviews_by_day, fetch_checkpoint_history
 from daily_reviews import (most_recent_before_midnight, day_start_utc,
                            estimate_reviews_today)
 from wk_detailed import (subjects_by_id,assignments_by_id,inventory,milestone_inventory,
@@ -415,12 +417,29 @@ def main():
     if daily_source_id:
         validate_source(daily_source_id,{
             "Name","Day","Lessons Today","Recent Pace (7d)",
-            "Radical Today","Kanji Today","Vocab Today","Daily Target"
+            "Radical Today","Kanji Today","Vocab Today","Daily Target",
+            "Reviews Done Approx","Review Measurement Window",
+            "Review Window Start","Review Window End","Review Data Quality"
         },notion_token)
-        history=history_rows(assignments,now,tz,tracking_start,daily_target)
+        # A single collection supports both the current seven-day tracker
+        # and the from-tracking-start SVGs. Refresh the last 7 rows in Notion
+        # while using the retained checkpoint history for all chart dates.
+        chart_days=history_rows(
+            assignments,now,tz,tracking_start,daily_target,
+            lookback_days=max(30,activity["Elapsed Days"]))
+        recent_checkpoint_rows=fetch_checkpoint_history(
+            notion,notion_token,checkpoints_id,chart_days[0]["Day"],tz) if chart_days else []
+        chart_days=reviews_by_day(chart_days,recent_checkpoint_rows,counters,now,tz)
+        history=chart_days[-7:]
         published=push_daily_rows(history,daily_source_id,notion_token,upsert,props)
-        print("Daily lesson chart local days:", [row["Day"].isoformat()
-              for row in history], published)
+        today_review=next((row for row in history
+                           if row["Day"]==now.astimezone(__import__("zoneinfo").ZoneInfo(tz)).date()),None)
+        if today_review:
+            daily_reviews={
+                "Reviews Today Approx":today_review["Reviews Done Approx"],
+                "Reviews Today Window":today_review["Review Measurement Window"]}
+        print("Daily lesson/review chart local days:",
+              [row["Day"].isoformat() for row in history],published)
     volume,samples=lessons_per_level(started_at,progressions)
     actual=activity["Lessons 30d Avg"]
     # Level-up lessons require Radical/Kanji (NOT Vocabulary). Starting
@@ -712,12 +731,15 @@ def main():
         # Does not consume Notion Free's single interactive Chart-view allowance.
         # Chart's left edge stays at the plan's tracking-start calendar date
         # (18 Oct 2026), even after the first 30 days.
-        chart_days=history_rows(assignments,now,tz,tracking_start,daily_target,
-                                lookback_days=max(30,activity["Elapsed Days"]))
         if update_daily_chart(notion,notion_token,n5_dashboard_id,
                               chart_days,now,tz):
             print("N5 combined daily chart image updated:",
                   len(chart_days),"local calendar days")
+        if update_discipline_chart(notion,notion_token,n5_dashboard_id,
+                                   chart_days,now,tz):
+            print("N5 Lessons vs Reviews chart updated:",
+                  len(chart_days),"local calendar days; "
+                  "reviews approximate from checkpoint windows")
     print("Success: Notion has been synchronized.")
 
 

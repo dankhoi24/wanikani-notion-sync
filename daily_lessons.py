@@ -69,8 +69,13 @@ def push_daily_rows(rows, source_id, token, upsert, props):
     for row in rows:
         day=row["Day"]
         title=day.isoformat()
-        numbers={k:v for k,v in row.items() if k != "Day"}
-        properties=props("Name",title,numbers,dates={"Day":day})
+        rich_keys=("Review Data Quality","Review Measurement Window")
+        date_keys=("Review Window Start","Review Window End")
+        numbers={k:v for k,v in row.items()
+                 if k not in ("Day",*rich_keys,*date_keys)}
+        rich={k:row[k] for k in rich_keys if k in row}
+        dates={"Day":day,**{k:row[k] for k in date_keys if k in row}}
+        properties=props("Name",title,numbers,dates=dates,rich=rich)
         result=upsert(source_id,"Name",title,properties,token)
         stats[result]+=1
     return stats

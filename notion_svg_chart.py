@@ -80,7 +80,7 @@ def to_png(svg):
     """
     from cairosvg import svg2png
     png=svg2png(bytestring=svg,scale=2)
-    if not png.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+    if not png.startswith(b"\x89PNG\r\n\x1a\n"):
         raise ValueError("Chart renderer did not produce PNG")
     if len(png)>=5_000_000:
         raise ValueError("PNG exceeds Notion Free plan 5 MB limit")
@@ -109,7 +109,7 @@ def send_svg(notion,token,svg,filename=NAME):
     with urlopen(request,timeout=45) as response:
         sent=json.loads(response.read().decode("utf-8"))
     if sent.get("status")!="uploaded":
-        raise ValueError(f"Notion SVG upload status: {sent.get('status')}")
+        raise ValueError(f"Notion PNG upload status: {sent.get('status')}")
     return file_id
 
 

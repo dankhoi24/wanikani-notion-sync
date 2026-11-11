@@ -1,8 +1,7 @@
-"""SVG combo chart refreshed into an existing Notion image block at every sync.
+"""Notion daily chart: generate vector plot, publish a rasterized PNG.
 
-Works on the Notion Free plan: this is a native SVG image, not a database Chart
-view. Two series (daily lesson starts and observed 7-day pace) plus target.
-SVG bytes go directly to Notion's File Upload API; no third-party chart host.
+Works on the Notion Free plan, without a database Chart view. The image is
+rasterized with CairoSVG to avoid SVG rendering/preview failures in Notion.
 """
 from datetime import datetime
 from html import escape
@@ -73,16 +72,34 @@ def chart_svg(rows, now, tz):
     return svg
 
 
+def to_png(svg):
+    """Rasterize the generated SVG for reliable Notion preview.
+
+    PNG is supported broadly in Notion's desktop/mobile/web viewers.
+    The SVG input is generated locally, not user-controlled.
+    """
+    from cairosvg import svg2png
+    png=svg2png(bytestring=svg,scale=2)
+    if not png.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+        raise ValueError("Chart renderer did not produce PNG")
+    if len(png)>=5_000_000:
+        raise ValueError("PNG exceeds Notion Free plan 5 MB limit")
+    return png
+
+
 def send_svg(notion,token,svg,filename=NAME):
+    """Compatibility wrapper: publish PNG, even though charts originate as SVG."""
+    filename=filename.rsplit(".",1)[0]+".png"
+    png=to_png(svg)
     upload=notion("POST","/file_uploads",token,{
-        "filename":filename,"content_type":"image/svg+xml"})
+        "filename":filename,"content_type":"image/png"})
     file_id=upload["id"]
     if not re.fullmatch(r"[0-9a-fA-F-]{36}",file_id):
         raise ValueError("Invalid Notion file-upload identifier")
-    boundary="n5-wanikani-chart-svg"
+    boundary="n5-wanikani-chart-png"
     header=(f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n"
-            "Content-Type: image/svg+xml\r\n\r\n").encode()
-    data=header+svg+f"\r\n--{boundary}--\r\n".encode()
+            "Content-Type: image/png\r\n\r\n").encode()
+    data=header+png+f"\r\n--{boundary}--\r\n".encode()
     request=Request(f"https://api.notion.com/v1/file_uploads/{file_id}/send",
                     data=data,method="POST",headers={
         "Authorization":"Bearer "+token,
